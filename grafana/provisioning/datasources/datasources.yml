@@ -1,0 +1,11 @@
+apiVersion: 1
+
+datasources:
+  - name: CostLens SQLite
+    uid: costlens-sqlite
+    type: frser-sqlite-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      path: /data/costlens.db
+    editable: true

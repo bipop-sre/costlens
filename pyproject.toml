@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "costlens"
+version = "0.1.0"
+description = "AI-powered CostLens agent for multi-cloud cost monitoring and optimization"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27.0",
+    "openai>=1.50.0",
+    "numpy>=1.26.0",
+    "boto3>=1.35.0",
+    "azure-mgmt-costmanagement>=4.0.0",
+    "azure-identity>=1.17.0",
+    "google-cloud-billing>=1.13.0",
+    "alibabacloud-bssopenapi20171214>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+costlens = "costlens.main:cli_main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

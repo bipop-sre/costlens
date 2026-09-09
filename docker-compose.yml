@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  costlens-web:
+    build: .
+    container_name: costlens-web
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=sqlite:///data/costlens.db
+      - LOG_LEVEL=INFO
+      - WEB_AUTH_TOKEN=${WEB_AUTH_TOKEN:-}
+      - WECHAT_WORK_WEBHOOK=${WECHAT_WORK_WEBHOOK:-}
+    volumes:
+      - costlens-data:/app/data
+      - ./costlens:/app/costlens
+    restart: unless-stopped
+    networks:
+      - costlens-network
+
+  costlens-scheduler:
+    build: .
+    container_name: costlens-scheduler
+    command: python run_scheduler.py
+    environment:
+      - DATABASE_URL=sqlite:///data/costlens.db
+      - LOG_LEVEL=INFO
+      - WECHAT_WORK_WEBHOOK=${WECHAT_WORK_WEBHOOK:-}
+    volumes:
+      - costlens-data:/app/data
+      - ./costlens:/app/costlens
+    restart: unless-stopped
+    networks:
+      - costlens-network
+    depends_on:
+      - costlens-web
+
+  costlens-bot:
+    build: .
+    container_name: costlens-bot
+    command: python run_bot.py
+    environment:
+      - DATABASE_URL=sqlite:///data/costlens.db
+      - LOG_LEVEL=INFO
+      - WECHAT_WORK_WEBHOOK=${WECHAT_WORK_WEBHOOK:-}
+    volumes:
+      - costlens-data:/app/data
+      - ./costlens:/app/costlens
+    restart: unless-stopped
+    networks:
+      - costlens-network
+    depends_on:
+      - costlens-web
+
+volumes:
+  costlens-data:
+    driver: local
+
+networks:
+  costlens-network:
+    driver: bridge

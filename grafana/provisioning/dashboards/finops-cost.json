@@ -1,0 +1,1064 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "📊 成本概览",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": []
+    },
+    {
+      "id": 1,
+      "title": "本月总成本 (CNY)",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT total_cost AS value FROM v_monthly_total ORDER BY year DESC, month DESC LIMIT 1",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "环比变化",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT mom_pct AS value FROM v_monthly_mom ORDER BY year DESC, month DESC LIMIT 1",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "阿里云可用余额 (CNY)",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT usable_balance AS value FROM v_balance WHERE provider = 'alibaba'",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "腾讯云可用余额 (CNY)",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT usable_balance AS value FROM v_balance WHERE provider = 'tencent'",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "📈 月度趋势",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 101,
+      "panels": []
+    },
+    {
+      "id": 5,
+      "title": "月度成本趋势 (含环比)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT period, total_cost, alibaba_cost, tencent_cost FROM v_monthly_total ORDER BY year, month",
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT period, mom_pct FROM v_monthly_mom ORDER BY year, month",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_cost"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "总成本"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 60
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "alibaba_cost"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "阿里云"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tencent_cost"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "腾讯云"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mom_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "环比 %"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "period"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "月份"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "title": "厂商成本分布",
+      "type": "barchart",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT period, provider_name, total_cost FROM v_provider_monthly ORDER BY year, month",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "orientation": "vertical",
+        "stacking": "normal",
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "barWidth": 0.6
+      }
+    },
+    {
+      "type": "row",
+      "title": "📊 同环比分析",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "id": 102,
+      "panels": []
+    },
+    {
+      "id": 7,
+      "title": "月度环比分析表",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT period AS 月份, total_cost AS 总成本, alibaba_cost AS 阿里云, tencent_cost AS 腾讯云, prev_cost AS 上月成本, change AS 变化金额, mom_pct AS 环比变化率 FROM v_monthly_mom ORDER BY year, month",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "月份",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "title": "厂商月度成本对比",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT period AS 月份, provider_name AS 厂商, ROUND(total_cost, 2) AS 总成本, ROUND(daily_avg, 2) AS 日均成本 FROM v_provider_monthly ORDER BY year, month, provider",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "月份",
+            "desc": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "🔍 服务分析",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 103,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "title": "本月 Top 10 服务",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT service_name AS 服务名称, ROUND(SUM(cost), 2) AS 成本, ROUND(SUM(cost) * 100.0 / (SELECT SUM(cost) FROM v_service_cost WHERE year=2026 AND month=8), 1) AS 占比 FROM v_service_cost WHERE year=2026 AND month=8 GROUP BY service_name ORDER BY SUM(cost) DESC LIMIT 10",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 10,
+      "title": "Top 10 服务月度趋势",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT service_name AS 服务名称, ROUND(SUM(CASE WHEN month=5 THEN cost ELSE 0 END), 2) AS \"5月\", ROUND(SUM(CASE WHEN month=6 THEN cost ELSE 0 END), 2) AS \"6月\", ROUND(SUM(CASE WHEN month=7 THEN cost ELSE 0 END), 2) AS \"7月\", ROUND(SUM(CASE WHEN month=8 THEN cost ELSE 0 END), 2) AS \"8月\" FROM v_service_trend WHERE service_name IN (SELECT service_name FROM v_service_trend WHERE year=2026 AND month=8 GROUP BY service_name ORDER BY SUM(cost) DESC LIMIT 10) GROUP BY service_name ORDER BY SUM(CASE WHEN month=8 THEN cost ELSE 0 END) DESC",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "row",
+      "title": "💳 账户余额 & 汇总",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 104,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "title": "账户余额详情",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT \n            provider_name AS 厂商,\n            ROUND(available_amount, 2) AS 账户余额,\n            ROUND(credit_amount, 2) AS 信用额度,\n            ROUND(usable_balance, 2) AS 实际可用,\n            ROUND(owe_amount, 2) AS 欠款金额,\n            currency AS 货币\n        FROM v_balance",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 12,
+      "title": "4个月成本汇总",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT period AS name, ROUND(total_cost, 0) AS value FROM v_monthly_total ORDER BY year, month",
+          "format": "table"
+        }
+      ],
+      "description": "",
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "allValues"
+          ]
+        },
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "type": "row",
+      "title": "📅 日粒度成本分析",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "id": 300,
+      "panels": []
+    },
+    {
+      "id": 301,
+      "title": "每日成本趋势",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT date, total_daily, alibaba_daily, tencent_daily FROM v_daily_trend ORDER BY date",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total_daily"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "总成本"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 50
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "alibaba_daily"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "阿里云"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tencent_daily"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "腾讯云"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "date"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "日期"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 302,
+      "title": "日均成本 (CNY)",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 42
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT ROUND(AVG(total_daily), 2) AS value FROM v_daily_trend",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 303,
+      "title": "最高 / 最低日成本",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 47
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT ROUND(MAX(total_daily), 2) AS value FROM v_daily_trend",
+          "format": "table"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT ROUND(MIN(total_daily), 2) AS value FROM v_daily_trend",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRefId",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "最高日成本"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRefId",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "最低日成本"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 304,
+      "title": "每日厂商成本分布",
+      "type": "barchart",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT date, provider_name, daily_cost FROM v_daily_cost ORDER BY date",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "orientation": "vertical",
+        "stacking": "normal",
+        "barWidth": 0.7,
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 305,
+      "title": "每日环比变化",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "\nSELECT t1.date,\n    ROUND(t1.total_daily, 2) AS today_cost,\n    CASE WHEN t2.total_daily > 0\n        THEN ROUND((t1.total_daily - t2.total_daily) / t2.total_daily * 100, 1)\n        ELSE 0\n    END AS dod_pct\nFROM v_daily_trend t1\nLEFT JOIN v_daily_trend t2 ON t2.date = date(t1.date, '-1 day')\nORDER BY t1.date",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "today_cost"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "当日成本"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "bars"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 40
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dod_pct"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "环比 %"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "date"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "日期"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 306,
+      "title": "每日 Top 服务",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "finops-sqlite"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "finops-sqlite"
+          },
+          "rawSql": "SELECT \n                date AS 日期,\n                service_name AS 服务,\n                provider_name AS 厂商,\n                ROUND(daily_cost, 2) AS 成本\n            FROM v_daily_top_services\n            ORDER BY date DESC, daily_cost DESC\n            LIMIT 200",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "日期",
+            "desc": true
+          }
+        ]
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "finops",
+    "cloud-cost"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6M",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "Asia/Shanghai",
+  "title": "多云成本管理看板",
+  "uid": "finops-cloud-cost",
+  "version": 1
+}
