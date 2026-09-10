@@ -17,11 +17,7 @@ dependencies = [
     "httpx>=0.27.0",
     "openai>=1.50.0",
     "numpy>=1.26.0",
-    "boto3>=1.35.0",
-    "azure-mgmt-costmanagement>=4.0.0",
-    "azure-identity>=1.17.0",
-    "google-cloud-billing>=1.13.0",
-    "alibabacloud-bssopenapi20171214>=3.0.0",
+    "pymysql>=1.1.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0.0",
 ]
