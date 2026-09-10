@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from collections import defaultdict
 from datetime import date
 from typing import Optional
 
 from costlens.config import Settings, get_settings
+from costlens.db import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +21,14 @@ PROVIDER_NAMES = {
 }
 
 
-def _query_month_data(year: int, month: int) -> dict:
-    """Query cost_records with smart dedup for a given month.
+def _adapt(sql: str) -> str:
+    return get_backend().adapt_sql(sql)
 
-    Returns:
-        {
-            "providers": {"alibaba": {"cost": X, "record_count": N}, ...},
-            "total_cost": float,
-            "top_services": [{"service": ..., "cost": ..., "provider": ...}, ...]
-        }
-    """
-    db = sqlite3.connect("costlens.db")
+
+def _query_month_data(year: int, month: int) -> dict:
+    """Query cost_records with smart dedup for a given month."""
+    backend = get_backend()
+    db = backend.raw_connect()
     start = f"{year}-{month:02d}-01"
     if month == 12:
         end = f"{year + 1}-01-01"
@@ -40,8 +37,7 @@ def _query_month_data(year: int, month: int) -> dict:
     base_where = "WHERE record_date >= ? AND record_date < ?"
     base_params = [start, end]
 
-    # Discover providers and granularities
-    check_q = f"SELECT provider, granularity, COUNT(*) FROM cost_records {base_where} GROUP BY provider, granularity"
+    check_q = _adapt(f"SELECT provider, granularity, COUNT(*) FROM cost_records {base_where} GROUP BY provider, granularity")
     cur = db.execute(check_q, base_params)
     provider_grans = {}
     for row in cur.fetchall():
@@ -56,31 +52,30 @@ def _query_month_data(year: int, month: int) -> dict:
         has_monthly = "monthly" in grans
 
         if has_daily and has_monthly:
-            # Smart dedup: daily + monthly-only services
             d_row = db.execute(
-                f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'",
+                _adapt(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'"),
                 base_params + [p],
             ).fetchone()
             mo_row = db.execute(
-                f"""SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records
+                _adapt(f"""SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records
                     {base_where} AND provider=? AND granularity='monthly'
                     AND service_name NOT IN (
                         SELECT DISTINCT service_name FROM cost_records {base_where} AND provider=? AND granularity='daily'
-                    )""",
+                    )"""),
                 base_params + [p] + base_params + [p],
             ).fetchone()
             cnt = (d_row[0] or 0) + (mo_row[0] or 0)
             cost = round((d_row[1] or 0) + (mo_row[1] or 0), 2)
         elif has_daily:
             row = db.execute(
-                f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'",
+                _adapt(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'"),
                 base_params + [p],
             ).fetchone()
             cnt = row[0] or 0
             cost = row[1] or 0
         else:
             row = db.execute(
-                f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='monthly'",
+                _adapt(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='monthly'"),
                 base_params + [p],
             ).fetchone()
             cnt = row[0] or 0
@@ -92,7 +87,7 @@ def _query_month_data(year: int, month: int) -> dict:
         # Top services
         if has_daily:
             cur2 = db.execute(
-                f"SELECT service_name, ROUND(SUM(cost),2) FROM cost_records {base_where} AND provider=? AND granularity='daily' GROUP BY service_name ORDER BY SUM(cost) DESC LIMIT 10",
+                _adapt(f"SELECT service_name, ROUND(SUM(cost),2) FROM cost_records {base_where} AND provider=? AND granularity='daily' GROUP BY service_name ORDER BY SUM(cost) DESC LIMIT 10"),
                 base_params + [p],
             )
             for r in cur2.fetchall():
@@ -100,12 +95,12 @@ def _query_month_data(year: int, month: int) -> dict:
 
         if has_monthly:
             cur3 = db.execute(
-                f"""SELECT service_name, ROUND(SUM(cost),2) FROM cost_records
+                _adapt(f"""SELECT service_name, ROUND(SUM(cost),2) FROM cost_records
                     {base_where} AND provider=? AND granularity='monthly'
                     AND service_name NOT IN (
                         SELECT DISTINCT service_name FROM cost_records {base_where} AND provider=? AND granularity='daily'
                     )
-                    GROUP BY service_name ORDER BY SUM(cost) DESC LIMIT 10""",
+                    GROUP BY service_name ORDER BY SUM(cost) DESC LIMIT 10"""),
                 base_params + [p] + base_params + [p],
             )
             for r in cur3.fetchall():
@@ -139,27 +134,20 @@ class MonthlyComparison:
         if month is None:
             month = today.month
 
-        # Query current month from cost_records
         current = _query_month_data(year, month)
 
-        # Previous month (MoM)
         if month == 1:
             prev_year, prev_month = year - 1, 12
         else:
             prev_year, prev_month = year, month - 1
         prev = _query_month_data(prev_year, prev_month)
 
-        # Same month last year (YoY)
         yoy = _query_month_data(year - 1, month)
 
-        # Build report
         lines = []
         lines.append(f"## 📊 {year}年{month}月 成本对比分析\n")
-
-        # Current month summary
         lines.append(f"### 💰 本月总成本: **{current['total_cost']:,.2f} CNY**\n")
 
-        # Provider breakdown
         lines.append("#### 🏢 厂商分布\n")
         for pv in ["alibaba", "tencent"]:
             curr_p = current["providers"].get(pv)
@@ -169,7 +157,6 @@ class MonthlyComparison:
             pct = cost / current["total_cost"] * 100 if current["total_cost"] > 0 else 0
             name = PROVIDER_NAMES.get(pv, pv)
 
-            # MoM change
             mom_change = ""
             prev_p = prev["providers"].get(pv)
             if prev_p and prev_p["cost"] > 0:
@@ -180,7 +167,6 @@ class MonthlyComparison:
 
         lines.append("")
 
-        # MoM comparison
         lines.append("#### 📈 环比分析 (vs 上月)\n")
         if prev["total_cost"] > 0:
             change = current["total_cost"] - prev["total_cost"]
@@ -191,7 +177,6 @@ class MonthlyComparison:
             lines.append("- 无上月数据，无法对比")
         lines.append("")
 
-        # YoY comparison
         lines.append("#### 📊 同比分析 (vs 去年同期)\n")
         if yoy["total_cost"] > 0:
             change = current["total_cost"] - yoy["total_cost"]
@@ -202,7 +187,6 @@ class MonthlyComparison:
             lines.append("- 无去年同期数据，无法对比")
         lines.append("")
 
-        # Top services
         if current["top_services"]:
             lines.append("#### 🔝 Top 10 服务\n")
             for i, svc in enumerate(current["top_services"], 1):

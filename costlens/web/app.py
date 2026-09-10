@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -16,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from costlens.web.auth import verify_token
 from costlens.web.budget_routes import router as budget_router
+from costlens.db import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-DB_PATH = "costlens.db"
 
 PROVIDER_NAMES = {
     "alibaba": "阿里云",
@@ -40,10 +38,14 @@ ENABLED_PROVIDERS = ["alibaba", "tencent"]
 app.include_router(budget_router)
 
 
+
 def _get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    backend = get_backend()
+    return backend.raw_connect()
+
+
+def _adapt(sql: str) -> str:
+    return get_backend().adapt_sql(sql)
 
 
 def _query_month_data(year: int, month: int) -> dict:
@@ -57,7 +59,7 @@ def _query_month_data(year: int, month: int) -> dict:
     base_where = "WHERE record_date >= ? AND record_date < ?"
     base_params = [start, end]
 
-    check_q = f"SELECT provider, granularity, COUNT(*) FROM cost_records {base_where} GROUP BY provider, granularity"
+    check_q = _adapt(f"SELECT provider, granularity, COUNT(*) FROM cost_records {base_where} GROUP BY provider, granularity")
     cur = db.execute(check_q, base_params)
     provider_grans = {}
     for row in cur.fetchall():
@@ -73,29 +75,29 @@ def _query_month_data(year: int, month: int) -> dict:
 
         if has_daily and has_monthly:
             d_row = db.execute(
-                f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'",
+                _adapt(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'"),
                 base_params + [p],
             ).fetchone()
             mo_row = db.execute(
-                f"""SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records
+                _adapt(f"""SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records
                     {base_where} AND provider=? AND granularity='monthly'
                     AND service_name NOT IN (
                         SELECT DISTINCT service_name FROM cost_records {base_where} AND provider=? AND granularity='daily'
-                    )""",
+                    )"""),
                 base_params + [p] + base_params + [p],
             ).fetchone()
             cnt = (d_row[0] or 0) + (mo_row[0] or 0)
             cost = round((d_row[1] or 0) + (mo_row[1] or 0), 2)
         elif has_daily:
             row = db.execute(
-                f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'",
+                _adapt(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='daily'"),
                 base_params + [p],
             ).fetchone()
             cnt = row[0] or 0
             cost = row[1] or 0
         else:
             row = db.execute(
-                f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='monthly'",
+                _adapt(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0),2) FROM cost_records {base_where} AND provider=? AND granularity='monthly'"),
                 base_params + [p],
             ).fetchone()
             cnt = row[0] or 0
@@ -107,7 +109,7 @@ def _query_month_data(year: int, month: int) -> dict:
         # Collect all services for this provider
         if has_daily:
             cur2 = db.execute(
-                f"SELECT service_name, ROUND(SUM(cost),2) as cost FROM cost_records {base_where} AND provider=? AND granularity='daily' GROUP BY service_name ORDER BY SUM(cost) DESC",
+                _adapt(f"SELECT service_name, ROUND(SUM(cost),2) as cost FROM cost_records {base_where} AND provider=? AND granularity='daily' GROUP BY service_name ORDER BY SUM(cost) DESC"),
                 base_params + [p],
             )
             for r in cur2.fetchall():
@@ -115,12 +117,12 @@ def _query_month_data(year: int, month: int) -> dict:
 
         if has_monthly:
             cur3 = db.execute(
-                f"""SELECT service_name, ROUND(SUM(cost),2) as cost FROM cost_records
+                _adapt(f"""SELECT service_name, ROUND(SUM(cost),2) as cost FROM cost_records
                     {base_where} AND provider=? AND granularity='monthly'
                     AND service_name NOT IN (
                         SELECT DISTINCT service_name FROM cost_records {base_where} AND provider=? AND granularity='daily'
                     )
-                    GROUP BY service_name ORDER BY SUM(cost) DESC""",
+                    GROUP BY service_name ORDER BY SUM(cost) DESC"""),
                 base_params + [p] + base_params + [p],
             )
             for r in cur3.fetchall():
@@ -144,271 +146,145 @@ async def check_auth(authorization: str = Header(None)):
     """Check if token is valid."""
     from costlens.config import get_settings
     settings = get_settings()
-    
-    if not settings.web_auth_token:
-        return {"valid": True, "auth_required": False}
-    
-    if not authorization:
-        return {"valid": False, "auth_required": True}
-    
-    token = authorization.replace("Bearer ", "")
-    if token != settings.web_auth_token:
-        return {"valid": False, "auth_required": True}
-    
-    return {"valid": True, "auth_required": True}
+    if authorization == f"Bearer {settings.web_auth_token}":
+        return {"valid": True}
+    return {"valid": False}
 
 
-# ── API Endpoints (all protected) ──
+# ── Dashboard API ──
 
 
 @app.get("/api/overview", dependencies=[Depends(verify_token)])
 async def get_overview():
-    """Dashboard overview: current month summary + last 6 months trend."""
+    """Get cost overview for current month."""
     today = date.today()
-    current = _query_month_data(today.year, today.month)
+    data = _query_month_data(today.year, today.month)
 
-    # Last month for MoM
+    # Previous month for MoM
     if today.month == 1:
         prev_y, prev_m = today.year - 1, 12
     else:
         prev_y, prev_m = today.year, today.month - 1
-    prev = _query_month_data(prev_y, prev_m)
+    prev_data = _query_month_data(prev_y, prev_m)
 
     mom_change = None
-    if prev["total_cost"] > 0:
-        mom_change = round((current["total_cost"] - prev["total_cost"]) / prev["total_cost"] * 100, 1)
+    if prev_data["total_cost"] > 0:
+        mom_change = round(
+            (data["total_cost"] - prev_data["total_cost"]) / prev_data["total_cost"] * 100, 1
+        )
 
-    # Last 6 months trend
-    trend = []
-    for i in range(5, -1, -1):
-        d = date(today.year, today.month, 1) - timedelta(days=i * 30)
-        y, m = d.year, d.month
-        data = _query_month_data(y, m)
-        trend.append({
-            "year": y,
-            "month": m,
-            "total_cost": data["total_cost"],
-            "providers": {p: v["cost"] for p, v in data["providers"].items()},
-        })
+    # Daily costs for current month
+    db = _get_db()
+    start = f"{today.year}-{today.month:02d}-01"
+    daily_rows = db.execute(
+        _adapt("SELECT record_date, ROUND(SUM(cost),2) as total FROM cost_records WHERE record_date >= ? AND granularity='daily' GROUP BY record_date ORDER BY record_date"),
+        [start],
+    ).fetchall()
+    db.close()
 
-    # Top 10 services
-    top_services = current["services"][:10]
+    daily_costs = [{"date": r[0], "cost": r[1]} for r in daily_rows]
 
     return {
-        "current_month": {
-            "year": today.year,
-            "month": today.month,
-            "total_cost": current["total_cost"],
-            "providers": {
-                p: {
-                    "name": PROVIDER_NAMES.get(p, p),
-                    "cost": v["cost"],
-                    "pct": round(v["cost"] / current["total_cost"] * 100, 1) if current["total_cost"] > 0 else 0,
-                }
-                for p, v in current["providers"].items()
-            },
-            "service_count": len(current["services"]),
-        },
-        "mom_change": mom_change,
-        "prev_month_cost": prev["total_cost"],
-        "trend": trend,
-        "top_services": top_services,
-    }
-
-
-@app.get("/api/cost/monthly", dependencies=[Depends(verify_token)])
-async def get_monthly_cost(year: int = Query(None), month: int = Query(None)):
-    """Get monthly cost data with smart dedup."""
-    if year is None or month is None:
-        today = date.today()
-        year = year or today.year
-        month = month or today.month
-
-    data = _query_month_data(year, month)
-
-    # Add MoM comparison
-    if month == 1:
-        prev_y, prev_m = year - 1, 12
-    else:
-        prev_y, prev_m = year, month - 1
-    prev = _query_month_data(prev_y, prev_m)
-
-    # Add YoY comparison
-    yoy = _query_month_data(year - 1, month)
-
-    return {
-        "year": year,
-        "month": month,
         "total_cost": data["total_cost"],
         "providers": {
-            p: {
-                "name": PROVIDER_NAMES.get(p, p),
-                "cost": v["cost"],
-                "record_count": v["record_count"],
-            }
+            p: {**v, "name": PROVIDER_NAMES.get(p, p)}
             for p, v in data["providers"].items()
         },
-        "services": data["services"],
-        "mom": {
-            "year": prev_y,
-            "month": prev_m,
-            "total_cost": prev["total_cost"],
-            "change": round(data["total_cost"] - prev["total_cost"], 2) if prev["total_cost"] > 0 else None,
-            "change_pct": round((data["total_cost"] - prev["total_cost"]) / prev["total_cost"] * 100, 1) if prev["total_cost"] > 0 else None,
-        },
-        "yoy": {
-            "year": year - 1,
-            "month": month,
-            "total_cost": yoy["total_cost"],
-            "change": round(data["total_cost"] - yoy["total_cost"], 2) if yoy["total_cost"] > 0 else None,
-            "change_pct": round((data["total_cost"] - yoy["total_cost"]) / yoy["total_cost"] * 100, 1) if yoy["total_cost"] > 0 else None,
-        },
+        "mom_change": mom_change,
+        "top_services": data["services"][:10],
+        "daily_costs": daily_costs,
     }
 
 
-@app.get("/api/cost/daily", dependencies=[Depends(verify_token)])
-async def get_daily_cost(
+@app.get("/api/daily", dependencies=[Depends(verify_token)])
+async def get_daily_costs(
     year: int = Query(None),
     month: int = Query(None),
     provider: str = Query(None),
 ):
     """Get daily cost breakdown."""
-    if year is None or month is None:
-        today = date.today()
-        year = year or today.year
-        month = month or today.month
+    today = date.today()
+    y = year or today.year
+    m = month or today.month
 
-    start = f"{year}-{month:02d}-01"
-    if month == 12:
-        end = f"{year + 1}-01-01"
+    start = f"{y}-{m:02d}-01"
+    if m == 12:
+        end = f"{y + 1}-01-01"
     else:
-        end = f"{year}-{month + 1:02d}-01"
+        end = f"{y}-{m + 1:02d}-01"
 
     db = _get_db()
-    where = "WHERE record_date >= ? AND record_date < ? AND granularity='daily'"
+    query = "SELECT record_date, provider, ROUND(SUM(cost),2) as total FROM cost_records WHERE record_date >= ? AND record_date < ? AND granularity='daily'"
     params = [start, end]
+
     if provider:
-        where += " AND provider=?"
+        query += " AND provider = ?"
         params.append(provider)
 
-    rows = db.execute(
-        f"SELECT record_date, provider, SUM(cost) as daily_cost FROM cost_records {where} GROUP BY record_date, provider ORDER BY record_date, provider",
-        params,
-    ).fetchall()
+    query += " GROUP BY record_date, provider ORDER BY record_date"
 
-    # Group by date
-    daily = defaultdict(lambda: {"total": 0, "providers": {}})
-    for row in rows:
-        d = row[0]
-        p = row[1]
-        cost = round(row[2], 2)
-        daily[d]["total"] = round(daily[d]["total"] + cost, 2)
-        daily[d]["providers"][p] = cost
-
-    # Convert to list
-    result = []
-    for d in sorted(daily.keys()):
-        result.append({
-            "date": d,
-            "total": daily[d]["total"],
-            "providers": daily[d]["providers"],
-        })
-
+    rows = db.execute(_adapt(query), params).fetchall()
     db.close()
-    return {"year": year, "month": month, "daily": result}
+
+    daily = defaultdict(lambda: defaultdict(float))
+    for r in rows:
+        daily[r[0]][r[1]] = r[2]
+
+    result = []
+    for dt, providers in sorted(daily.items()):
+        entry = {"date": dt, "total": round(sum(providers.values()), 2)}
+        entry.update(providers)
+        result.append(entry)
+
+    return {"daily": result}
 
 
-@app.get("/api/cost/services", dependencies=[Depends(verify_token)])
-async def get_service_costs(
+@app.get("/api/services", dependencies=[Depends(verify_token)])
+async def get_services(
     year: int = Query(None),
     month: int = Query(None),
     provider: str = Query(None),
 ):
-    """Get service-level cost breakdown with MoM comparison."""
-    if year is None or month is None:
-        today = date.today()
-        year = year or today.year
-        month = month or today.month
+    """Get cost breakdown by service with MoM comparison."""
+    today = date.today()
+    y = year or today.year
+    m = month or today.month
 
-    data = _query_month_data(year, month)
+    data = _query_month_data(y, m)
 
-    # Get previous month data for MoM
-    if month == 1:
-        prev_y, prev_m = year - 1, 12
+    # Get previous month data for comparison
+    if m == 1:
+        prev_y, prev_m = y - 1, 12
     else:
-        prev_y, prev_m = year, month - 1
+        prev_y, prev_m = y, m - 1
     prev_data = _query_month_data(prev_y, prev_m)
 
-    # Build lookup dict for previous month services
-    prev_services = {}
+    # Build previous month service cost map: (provider, service) -> cost
+    prev_cost_map = {}
     for s in prev_data["services"]:
-        key = (s["provider"], s["service"])
-        prev_services[key] = s["cost"]
+        prev_cost_map[(s["provider"], s["service"])] = s["cost"]
 
-    # Add MoM to current services
+    # Add MoM data to each service
+    services = []
     for s in data["services"]:
-        key = (s["provider"], s["service"])
-        prev_cost = prev_services.get(key, 0)
-        if prev_cost > 0:
-            s["mom_cost"] = prev_cost
-            s["mom_change"] = round(s["cost"] - prev_cost, 2)
-            s["mom_change_pct"] = round((s["cost"] - prev_cost) / prev_cost * 100, 1)
+        if provider and s["provider"] != provider:
+            continue
+        prev_cost = prev_cost_map.get((s["provider"], s["service"]))
+        service_entry = {
+            "service": s["service"],
+            "cost": s["cost"],
+            "provider": s["provider"],
+            "mom_cost": prev_cost if prev_cost is not None else None,
+        }
+        if prev_cost is not None and prev_cost > 0:
+            service_entry["mom_change"] = round(s["cost"] - prev_cost, 2)
+            service_entry["mom_change_pct"] = round((s["cost"] - prev_cost) / prev_cost * 100, 1)
         else:
-            s["mom_cost"] = None
-            s["mom_change"] = None
-            s["mom_change_pct"] = None
+            service_entry["mom_change"] = None
+            service_entry["mom_change_pct"] = None
+        services.append(service_entry)
 
-    if provider:
-        data["services"] = [s for s in data["services"] if s["provider"] == provider]
-
-    # Group by provider
-    by_provider = defaultdict(list)
-    for s in data["services"]:
-        by_provider[s["provider"]].append(s)
-
-    return {
-        "year": year,
-        "month": month,
-        "prev_month": {"year": prev_y, "month": prev_m},
-        "by_provider": {
-            p: {
-                "name": PROVIDER_NAMES.get(p, p),
-                "services": services,
-                "total": round(sum(s["cost"] for s in services), 2),
-            }
-            for p, services in by_provider.items()
-        },
-    }
-
-
-@app.get("/api/balance", dependencies=[Depends(verify_token)])
-async def get_balance():
-    """Get latest balance for each provider."""
-    db = _get_db()
-    rows = db.execute(
-        """SELECT provider, available_amount, credit_amount, credit_balance,
-                  owe_amount, currency, snapshot_at
-           FROM balance_snapshots
-           WHERE snapshot_at IN (
-               SELECT MAX(snapshot_at) FROM balance_snapshots GROUP BY provider
-           )
-           ORDER BY provider"""
-    ).fetchall()
-    db.close()
-
-    result = []
-    for row in rows:
-        result.append({
-            "provider": row[0],
-            "name": PROVIDER_NAMES.get(row[0], row[0]),
-            "available_amount": round(row[1] or 0, 2),
-            "credit_amount": round(row[2] or 0, 2),
-            "credit_balance": round(row[3] or 0, 2),
-            "owe_amount": round(row[4] or 0, 2),
-            "currency": row[5] or "CNY",
-            "updated_at": row[6],
-        })
-    return {"balance": result}
+    return {"services": services}
 
 
 @app.post("/api/sync", dependencies=[Depends(verify_token)])
@@ -438,11 +314,11 @@ async def get_alerts(limit: int = Query(50), acknowledged: bool = Query(None)):
         params.append(1 if acknowledged else 0)
 
     rows = db.execute(
-        f"""SELECT id, alert_type, severity, title, message, provider,
+        _adapt(f"""SELECT id, alert_type, severity, title, message, provider,
                    current_value, threshold_value, currency,
                    acknowledged, notified, timestamp
             FROM alerts {provider_filter}
-            ORDER BY timestamp DESC LIMIT ?""",
+            ORDER BY timestamp DESC LIMIT ?"""),
         params + [limit],
     ).fetchall()
     db.close()
@@ -472,7 +348,7 @@ async def get_alerts(limit: int = Query(50), acknowledged: bool = Query(None)):
 async def acknowledge_alert(alert_id: int):
     """Acknowledge an alert."""
     db = _get_db()
-    db.execute("UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,))
+    db.execute(_adapt("UPDATE alerts SET acknowledged = 1 WHERE id = ?"), (alert_id,))
     db.commit()
     db.close()
     return {"status": "ok"}
@@ -554,6 +430,38 @@ async def get_sync_status():
         ],
     }
 
+
+
+
+@app.get("/api/balance", dependencies=[Depends(verify_token)])
+async def get_balance():
+    """Get latest balance for each provider."""
+    db = _get_db()
+    rows = db.execute(
+        """SELECT provider, available_amount, credit_amount, credit_balance,
+                  owe_amount, currency, snapshot_at
+           FROM balance_snapshots
+           WHERE snapshot_at IN (
+               SELECT MAX(snapshot_at) FROM balance_snapshots GROUP BY provider
+           )
+           ORDER BY provider"""
+    ).fetchall()
+    db.close()
+    return {
+        "balance": [
+            {
+                "provider": r[0],
+                "name": PROVIDER_NAMES.get(r[0], r[0]),
+                "available_amount": round(r[1] or 0, 2),
+                "credit_amount": round(r[2] or 0, 2),
+                "credit_balance": round(r[3] or 0, 2),
+                "owe_amount": round(r[4] or 0, 2),
+                "currency": r[5] or "CNY",
+                "updated": r[6],
+            }
+            for r in rows
+        ]
+    }
 
 # ── Serve Dashboard HTML ──
 

@@ -7,11 +7,11 @@ alerts and reports to WeChat Work.
 from __future__ import annotations
 
 import logging
-import sqlite3
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from costlens.config import Settings, get_settings
+from costlens.db import get_backend
 from costlens.models.alert import Alert, AlertSeverity, AlertType
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,10 @@ PROVIDER_NAMES = {
     "alibaba": "阿里云",
     "tencent": "腾讯云",
 }
+
+
+def _adapt(sql: str) -> str:
+    return get_backend().adapt_sql(sql)
 
 
 class ProactiveInspector:
@@ -32,14 +36,7 @@ class ProactiveInspector:
         self._last_weekly_report: Optional[date] = None
 
     async def inspect_after_sync(self, broadcast_fn) -> dict:
-        """Run inspection after billing sync completes.
-        
-        Args:
-            broadcast_fn: async function to broadcast messages to WeChat Work
-            
-        Returns:
-            dict with inspection results
-        """
+        """Run inspection after billing sync completes."""
         now = datetime.now()
         results = {
             "alerts_created": 0,
@@ -66,7 +63,7 @@ class ProactiveInspector:
         # 2. Daily cost report (once per day, after 9 AM)
         today = date.today()
         if (self._last_daily_report != today and now.hour >= 9 and 
-            now.hour <= 10):  # 9-10 AM window
+            now.hour <= 10):
             try:
                 report = self._generate_daily_report()
                 if report:
@@ -78,7 +75,7 @@ class ProactiveInspector:
                 logger.error("Failed to send daily report: %s", exc)
 
         # 3. Weekly cost report (every Monday, 9-10 AM)
-        if (today.weekday() == 0 and  # Monday
+        if (today.weekday() == 0 and
             self._last_weekly_report != today and 
             now.hour >= 9 and now.hour <= 10):
             try:
@@ -102,7 +99,6 @@ class ProactiveInspector:
         storage = get_storage()
         detector = AnomalyDetector(threshold_sigma=2.5, spike_threshold_pct=30.0)
         
-        # Get last 30 days of records
         end_date = date.today()
         start_date = end_date - timedelta(days=30)
         
@@ -115,12 +111,10 @@ class ProactiveInspector:
             )
             if records:
                 provider_alerts = detector.detect_anomalies(records, provider)
-                # Filter: only today's anomalies
                 today_str = end_date.isoformat()
                 for alert in provider_alerts:
                     if today_str in alert.message:
                         alerts.append(alert)
-                        # Save to database
                         storage.save_alert(alert)
         
         return alerts
@@ -129,60 +123,52 @@ class ProactiveInspector:
         """Format critical alerts for WeChat Work message."""
         lines = ["## 🚨 成本异常告警\n"]
         
-        for alert in alerts[:5]:  # Top 5
+        for alert in alerts[:5]:
             provider_name = PROVIDER_NAMES.get(alert.provider, alert.provider)
             lines.append(f"**{provider_name}** - {alert.title}")
-            lines.append(f"- {alert.message}")
-            lines.append(f"- 当前成本: ¥{alert.current_value:,.2f}")
-            lines.append("")
-        
-        if len(alerts) > 5:
-            lines.append(f"及其他 {len(alerts) - 5} 条告警，请查看详情")
+            lines.append(f"> {alert.message}\n")
         
         return "\n".join(lines)
 
     def _generate_daily_report(self) -> str:
         """Generate daily cost summary report."""
-        db = sqlite3.connect("costlens.db")
-        db.row_factory = sqlite3.Row
+        backend = get_backend()
+        db = backend.raw_connect()
         
         today = date.today()
         yesterday = today - timedelta(days=1)
         
-        # Get yesterday's cost by provider
-        rows = db.execute("""
+        rows = db.execute(_adapt("""
             SELECT provider, ROUND(SUM(cost), 2) as total
             FROM cost_records
             WHERE record_date = ? AND granularity = 'daily'
             GROUP BY provider
-        """, (yesterday.isoformat(),)).fetchall()
+        """), (yesterday.isoformat(),)).fetchall()
         
         if not rows:
+            db.close()
             return ""
         
         total_cost = sum(r["total"] for r in rows)
         
-        # Get day before yesterday for comparison
-        prev_rows = db.execute("""
+        prev_rows = db.execute(_adapt("""
             SELECT provider, ROUND(SUM(cost), 2) as total
             FROM cost_records
             WHERE record_date = ? AND granularity = 'daily'
             GROUP BY provider
-        """, ((yesterday - timedelta(days=1)).isoformat(),)).fetchall()
+        """), ((yesterday - timedelta(days=1)).isoformat(),)).fetchall()
         prev_total = sum(r["total"] for r in prev_rows) if prev_rows else 0
         
-        # Month-to-date
         month_start = today.replace(day=1)
-        mtd_rows = db.execute("""
+        mtd_rows = db.execute(_adapt("""
             SELECT ROUND(SUM(cost), 2) as total
             FROM cost_records
             WHERE record_date >= ? AND record_date <= ? AND granularity = 'daily'
-        """, (month_start.isoformat(), yesterday.isoformat())).fetchone()
+        """), (month_start.isoformat(), yesterday.isoformat())).fetchone()
         mtd_cost = mtd_rows["total"] if mtd_rows else 0
         
         db.close()
         
-        # Format report
         lines = [f"## 📊 {today.strftime('%m月%d日')} 成本日报\n"]
         lines.append(f"**昨日总成本**: ¥{total_cost:,.2f}")
         
@@ -194,7 +180,6 @@ class ProactiveInspector:
         
         lines.append(f"\n**本月累计**: ¥{mtd_cost:,.2f}")
         
-        # Provider breakdown
         lines.append("\n**厂商明细**:")
         for row in rows:
             provider_name = PROVIDER_NAMES.get(row["provider"], row["provider"])
@@ -204,47 +189,43 @@ class ProactiveInspector:
 
     def _generate_weekly_report(self) -> str:
         """Generate weekly cost summary report."""
-        db = sqlite3.connect("costlens.db")
-        db.row_factory = sqlite3.Row
+        backend = get_backend()
+        db = backend.raw_connect()
         
         today = date.today()
         week_start = today - timedelta(days=7)
         prev_week_start = week_start - timedelta(days=7)
         
-        # This week's cost
-        this_week_rows = db.execute("""
+        this_week_rows = db.execute(_adapt("""
             SELECT provider, ROUND(SUM(cost), 2) as total
             FROM cost_records
             WHERE record_date >= ? AND record_date < ? AND granularity = 'daily'
             GROUP BY provider
-        """, (week_start.isoformat(), today.isoformat())).fetchall()
+        """), (week_start.isoformat(), today.isoformat())).fetchall()
         this_week_total = sum(r["total"] for r in this_week_rows)
         
-        # Last week's cost
-        last_week_rows = db.execute("""
+        last_week_rows = db.execute(_adapt("""
             SELECT provider, ROUND(SUM(cost), 2) as total
             FROM cost_records
             WHERE record_date >= ? AND record_date < ? AND granularity = 'daily'
             GROUP BY provider
-        """, (prev_week_start.isoformat(), week_start.isoformat())).fetchall()
+        """), (prev_week_start.isoformat(), week_start.isoformat())).fetchall()
         last_week_total = sum(r["total"] for r in last_week_rows)
         
-        # Top 5 services this week
-        top_services = db.execute("""
+        top_services = db.execute(_adapt("""
             SELECT service_name, ROUND(SUM(cost), 2) as total
             FROM cost_records
             WHERE record_date >= ? AND record_date < ? AND granularity = 'daily'
             GROUP BY service_name
             ORDER BY total DESC
             LIMIT 5
-        """, (week_start.isoformat(), today.isoformat())).fetchall()
+        """), (week_start.isoformat(), today.isoformat())).fetchall()
         
         db.close()
         
         if this_week_total == 0:
             return ""
         
-        # Format report
         lines = [f"## 📈 成本周报 ({week_start.strftime('%m/%d')} - {today.strftime('%m/%d')})\n"]
         lines.append(f"**本周总成本**: ¥{this_week_total:,.2f}")
         
@@ -255,14 +236,12 @@ class ProactiveInspector:
             lines.append(f"- 周环比: <font color='{change_color}'>{change_symbol} {abs(change_pct):.1f}%</font>")
             lines.append(f"- 上周成本: ¥{last_week_total:,.2f}")
         
-        # Provider breakdown
         lines.append("\n**厂商分布**:")
         for row in this_week_rows:
             provider_name = PROVIDER_NAMES.get(row["provider"], row["provider"])
             pct = row["total"] / this_week_total * 100
             lines.append(f"- {provider_name}: ¥{row['total']:,.2f} ({pct:.1f}%)")
         
-        # Top services
         if top_services:
             lines.append("\n**Top 5 服务**:")
             for i, row in enumerate(top_services, 1):

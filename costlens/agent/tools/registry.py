@@ -327,11 +327,14 @@ class ToolRegistry:
     def _register_db_cost_query_tool(self) -> None:
         """Query cost data from local database (fast, complete)."""
         async def handler(month: int, year: int = 0, provider: str = "") -> dict:
-            import sqlite3
+            from costlens.db import get_backend
             from datetime import datetime
             if year == 0:
                 year = datetime.now().year
-            db = sqlite3.connect("costlens.db")
+            backend = get_backend()
+            db = backend.raw_connect()
+            def _a(sql):
+                return backend.adapt_sql(sql)
 
             period_start = f"{year}-{month:02d}-01"
             if month == 12:
@@ -345,7 +348,7 @@ class ToolRegistry:
             base_params = [period_start, period_end]
 
             # Check which granularities exist per provider
-            check_query = f"SELECT provider, granularity, COUNT(*) as cnt FROM cost_records {base_where} GROUP BY provider, granularity"
+            check_query = _a(f"SELECT provider, granularity, COUNT(*) as cnt FROM cost_records {base_where} GROUP BY provider, granularity")
             cur = db.execute(check_query, base_params)
             provider_granularities = {}
             for row in cur.fetchall():
@@ -366,17 +369,17 @@ class ToolRegistry:
 
                 if has_daily and has_monthly:
                     # Smart dedup: daily data + monthly-only services (daily API misses some products)
-                    daily_q = f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records {base_where} AND provider = ? AND granularity = 'daily'"
+                    daily_q = _a(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records {base_where} AND provider = ? AND granularity = 'daily'")
                     daily_row = db.execute(daily_q, base_params + [p]).fetchone()
                     daily_cnt = daily_row[0] or 0
                     daily_total = daily_row[1] or 0
 
-                    monthly_only_q = f"""SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records
+                    monthly_only_q = _a(f"""SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records
                         {base_where} AND provider = ? AND granularity = 'monthly'
                         AND service_name NOT IN (
                             SELECT DISTINCT service_name FROM cost_records
                             {base_where} AND provider = ? AND granularity = 'daily'
-                        )"""
+                        )""")
                     mo_row = db.execute(monthly_only_q, base_params + [p] + base_params + [p]).fetchone()
                     mo_cnt = mo_row[0] or 0
                     mo_total = mo_row[1] or 0
@@ -388,7 +391,7 @@ class ToolRegistry:
 
                 elif has_daily:
                     gran_where = f"{base_where} AND provider = ? AND granularity = 'daily'"
-                    q = f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records {gran_where}"
+                    q = _a(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records {gran_where}")
                     row = db.execute(q, base_params + [p]).fetchone()
                     cnt = row[0] or 0
                     total = row[1] or 0
@@ -397,7 +400,7 @@ class ToolRegistry:
 
                 else:
                     gran_where = f"{base_where} AND provider = ? AND granularity = 'monthly'"
-                    q = f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records {gran_where}"
+                    q = _a(f"SELECT COUNT(*), ROUND(COALESCE(SUM(cost),0), 2) FROM cost_records {gran_where}")
                     row = db.execute(q, base_params + [p]).fetchone()
                     cnt = row[0] or 0
                     total = row[1] or 0
@@ -413,7 +416,7 @@ class ToolRegistry:
                 has_monthly = "monthly" in grans
 
                 if has_daily:
-                    svc_query = f"SELECT service_name, ROUND(SUM(cost), 2) as total FROM cost_records {base_where} AND provider = ? AND granularity = 'daily' GROUP BY service_name ORDER BY total DESC LIMIT 10"
+                    svc_query = _a(f"SELECT service_name, ROUND(SUM(cost), 2) as total FROM cost_records {base_where} AND provider = ? AND granularity = 'daily' GROUP BY service_name ORDER BY total DESC LIMIT 10")
                     cur2 = db.execute(svc_query, base_params + [p])
                     daily_svc_names = set()
                     for r in cur2.fetchall():
@@ -421,13 +424,13 @@ class ToolRegistry:
                         daily_svc_names.add(r[0])
 
                 if has_monthly:
-                    mo_svc_query = f"""SELECT service_name, ROUND(SUM(cost), 2) as total FROM cost_records
+                    mo_svc_query = _a(f"""SELECT service_name, ROUND(SUM(cost), 2) as total FROM cost_records
                         {base_where} AND provider = ? AND granularity = 'monthly'
                         AND service_name NOT IN (
                             SELECT DISTINCT service_name FROM cost_records
                             {base_where} AND provider = ? AND granularity = 'daily'
                         )
-                        GROUP BY service_name ORDER BY total DESC LIMIT 10"""
+                        GROUP BY service_name ORDER BY total DESC LIMIT 10""")
                     cur3 = db.execute(mo_svc_query, base_params + [p] + base_params + [p])
                     for r in cur3.fetchall():
                         all_top_services.append({"service": r[0], "cost": r[1], "provider": p})

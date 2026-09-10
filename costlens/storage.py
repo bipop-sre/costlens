@@ -1,15 +1,13 @@
-"""SQLite persistent storage for CostLens data."""
+"""Persistent storage for CostLens data (SQLite / OceanBase)."""
 
 from __future__ import annotations
 
 import json
 import logging
-import sqlite3
-from contextlib import contextmanager
 from datetime import date, datetime
-from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any, Optional
 
+from costlens.db import get_backend
 from costlens.models.alert import Alert, AlertSeverity, AlertType
 from costlens.models.budget import Budget, BudgetPeriod
 from costlens.models.cost import CostRecord, CostSummary, Granularity
@@ -17,6 +15,7 @@ from costlens.models.recommendation import Priority, Recommendation, Recommendat
 
 logger = logging.getLogger(__name__)
 
+# SQLite schema (kept for backward compat and SQLite backend)
 DB_SCHEMA = """
 CREATE TABLE IF NOT EXISTS cost_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,8 +30,9 @@ CREATE TABLE IF NOT EXISTS cost_records (
     tags TEXT DEFAULT '{}',
     record_date DATE NOT NULL,
     granularity TEXT DEFAULT 'daily',
+    subscription_type TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(provider, account_id, service_name, region, record_date, granularity)
+    UNIQUE(provider, account_id, service_name, region, record_date, granularity, subscription_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_cost_records_date ON cost_records(record_date);
@@ -148,29 +148,15 @@ CREATE INDEX IF NOT EXISTS idx_monthly_cost_period ON monthly_cost_snapshots(yea
 
 
 class Storage:
-    """SQLite storage for CostLens data."""
+    """Storage for CostLens data using pluggable backend."""
 
-    def __init__(self, db_path: str = "costlens.db") -> None:
-        self.db_path = db_path
+    def __init__(self) -> None:
+        self._backend = get_backend()
         self._init_db()
 
     def _init_db(self) -> None:
         """Initialize database schema."""
-        with self._connect() as conn:
-            conn.executescript(DB_SCHEMA)
-            conn.commit()
-
-    @contextmanager
-    def _connect(self) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager for database connections."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        try:
-            yield conn
-        finally:
-            conn.close()
+        self._backend.init_schema()
 
     # ── Cost Records ──
 
@@ -179,20 +165,22 @@ class Storage:
         if not records:
             return 0
 
-        with self._connect() as conn:
+        with self._backend.connect() as conn:
             count = 0
             for r in records:
                 try:
-                    # Extract subscription_type from tags
                     subscription_type = r.tags.get('subscription_type', '')
-                    conn.execute(
+                    sql = self._backend.adapt_sql(
                         """INSERT INTO cost_records
                            (provider, account_id, service_name, region, cost, currency,
                             usage_amount, usage_unit, tags, record_date, granularity, subscription_type)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                            ON CONFLICT(provider, account_id, service_name, region, record_date, granularity, subscription_type)
                            DO UPDATE SET cost=excluded.cost, usage_amount=excluded.usage_amount,
-                                         tags=excluded.tags""",
+                                         tags=excluded.tags"""
+                    )
+                    conn.execute(
+                        sql,
                         (
                             r.provider, r.account_id, r.service_name, r.region,
                             r.cost, r.currency, r.usage_amount, r.usage_unit,
@@ -207,19 +195,16 @@ class Storage:
             return count
 
     def _delete_monthly_records(self, provider: str, start_date: date, end_date: date) -> int:
-        """Delete monthly granularity records for a provider in the given date range.
-        Used to prevent double-counting when daily data is available.
-        """
-        with self._connect() as conn:
-            cur = conn.execute(
+        """Delete monthly granularity records for a provider in the given date range."""
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """DELETE FROM cost_records
                    WHERE provider = ? AND granularity = 'monthly'
-                   AND record_date >= ? AND record_date <= ?""",
-                (provider, start_date.isoformat(), end_date.isoformat()),
+                   AND record_date >= ? AND record_date <= ?"""
             )
+            cur = conn.execute(sql, (provider, start_date.isoformat(), end_date.isoformat()))
             conn.commit()
             return cur.rowcount
-
 
     def get_cost_records(
         self,
@@ -241,8 +226,8 @@ class Storage:
 
         query += " ORDER BY record_date DESC, cost DESC"
 
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+        with self._backend.connect() as conn:
+            rows = conn.execute(self._backend.adapt_sql(query), params).fetchall()
             return [self._row_to_cost_record(row) for row in rows]
 
     def get_daily_totals(
@@ -261,8 +246,8 @@ class Storage:
 
         query += " GROUP BY record_date ORDER BY record_date"
 
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+        with self._backend.connect() as conn:
+            rows = conn.execute(self._backend.adapt_sql(query), params).fetchall()
             return {row["record_date"]: row["total"] for row in rows}
 
     def get_service_totals(
@@ -283,8 +268,8 @@ class Storage:
 
         query += " GROUP BY service_name ORDER BY total DESC"
 
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+        with self._backend.connect() as conn:
+            rows = conn.execute(self._backend.adapt_sql(query), params).fetchall()
             return {row["service_name"]: row["total"] for row in rows}
 
     # ── Alerts ──
@@ -294,15 +279,18 @@ class Storage:
         if not alerts:
             return 0
 
-        with self._connect() as conn:
+        with self._backend.connect() as conn:
             count = 0
             for a in alerts:
-                conn.execute(
+                sql = self._backend.adapt_sql(
                     """INSERT INTO alerts
                        (alert_type, severity, title, message, provider,
                         current_value, threshold_value, currency, resource_id,
                         details, timestamp)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                )
+                conn.execute(
+                    sql,
                     (
                         a.alert_type.value, a.severity.value, a.title, a.message,
                         a.provider, a.current_value, a.threshold_value, a.currency,
@@ -312,6 +300,10 @@ class Storage:
                 count += 1
             conn.commit()
             return count
+
+    def save_alert(self, alert: Alert) -> int:
+        """Save a single alert."""
+        return self.save_alerts([alert])
 
     def get_alerts(
         self,
@@ -341,16 +333,15 @@ class Storage:
         query += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
 
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+        with self._backend.connect() as conn:
+            rows = conn.execute(self._backend.adapt_sql(query), params).fetchall()
             return [dict(row) for row in rows]
 
     def acknowledge_alert(self, alert_id: int) -> bool:
         """Mark an alert as acknowledged."""
-        with self._connect() as conn:
-            cursor = conn.execute(
-                "UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,)
-            )
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql("UPDATE alerts SET acknowledged = 1 WHERE id = ?")
+            cursor = conn.execute(sql, (alert_id,))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -359,21 +350,21 @@ class Storage:
         if not alert_ids:
             return 0
         placeholders = ",".join("?" * len(alert_ids))
-        with self._connect() as conn:
-            cursor = conn.execute(
-                f"UPDATE alerts SET notified = 1 WHERE id IN ({placeholders})",
-                alert_ids,
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
+                f"UPDATE alerts SET notified = 1 WHERE id IN ({placeholders})"
             )
+            cursor = conn.execute(sql, alert_ids)
             conn.commit()
             return cursor.rowcount
 
     def get_unnotified_alerts(self, limit: int = 50) -> list[dict]:
         """Get alerts that haven't been sent as notifications."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM alerts WHERE notified = 0 ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
+                "SELECT * FROM alerts WHERE notified = 0 ORDER BY timestamp DESC LIMIT ?"
+            )
+            rows = conn.execute(sql, (limit,)).fetchall()
             return [dict(row) for row in rows]
 
     # ── Recommendations ──
@@ -383,16 +374,19 @@ class Storage:
         if not recommendations:
             return 0
 
-        with self._connect() as conn:
+        with self._backend.connect() as conn:
             count = 0
             for r in recommendations:
-                conn.execute(
+                sql = self._backend.adapt_sql(
                     """INSERT INTO recommendations
                        (rec_type, priority, title, description, provider,
                         service_name, region, resource_id, current_cost,
                         estimated_saving, estimated_saving_pct, currency,
                         effort, impact, details, action_items)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+                )
+                conn.execute(
+                    sql,
                     (
                         r.rec_type.value, r.priority.value, r.title, r.description,
                         r.provider, r.service_name, r.region, r.resource_id,
@@ -405,44 +399,12 @@ class Storage:
             conn.commit()
             return count
 
-    def get_recommendations(
-        self,
-        priority: Optional[str] = None,
-        applied: Optional[bool] = None,
-        limit: int = 50,
-    ) -> list[dict]:
-        """Query recommendations."""
-        query = "SELECT * FROM recommendations WHERE 1=1"
-        params: list[Any] = []
-
-        if priority:
-            query += " AND priority = ?"
-            params.append(priority)
-        if applied is not None:
-            query += " AND applied = ?"
-            params.append(1 if applied else 0)
-
-        query += " ORDER BY estimated_saving DESC LIMIT ?"
-        params.append(limit)
-
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-            return [dict(row) for row in rows]
-
-    def get_total_potential_savings(self) -> float:
-        """Get total potential savings from unapplied recommendations."""
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT SUM(estimated_saving) as total FROM recommendations WHERE applied = 0"
-            ).fetchone()
-            return row["total"] or 0.0
-
     # ── Budgets ──
 
     def save_budget(self, budget: Budget) -> int:
         """Save or update a budget."""
-        with self._connect() as conn:
-            cursor = conn.execute(
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """INSERT INTO budgets
                    (name, amount, currency, period, provider, service_name,
                     tags, alert_thresholds, start_date)
@@ -452,7 +414,10 @@ class Storage:
                    period=excluded.period, provider=excluded.provider,
                    service_name=excluded.service_name, tags=excluded.tags,
                    alert_thresholds=excluded.alert_thresholds,
-                   start_date=excluded.start_date, updated_at=CURRENT_TIMESTAMP""",
+                   start_date=excluded.start_date, updated_at=CURRENT_TIMESTAMP"""
+            )
+            cursor = conn.execute(
+                sql,
                 (
                     budget.name, budget.amount, budget.currency, budget.period.value,
                     budget.provider, budget.service_name,
@@ -466,14 +431,15 @@ class Storage:
 
     def get_budgets(self) -> list[Budget]:
         """Get all budgets."""
-        with self._connect() as conn:
+        with self._backend.connect() as conn:
             rows = conn.execute("SELECT * FROM budgets ORDER BY name").fetchall()
             return [self._row_to_budget(row) for row in rows]
 
     def delete_budget(self, name: str) -> bool:
         """Delete a budget by name."""
-        with self._connect() as conn:
-            cursor = conn.execute("DELETE FROM budgets WHERE name = ?", (name,))
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql("DELETE FROM budgets WHERE name = ?")
+            cursor = conn.execute(sql, (name,))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -481,12 +447,15 @@ class Storage:
 
     def save_analysis_run(self, result: dict) -> int:
         """Save an analysis run result."""
-        with self._connect() as conn:
-            cursor = conn.execute(
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """INSERT INTO analysis_runs
                    (start_date, end_date, total_cost, alert_count,
                     recommendation_count, total_savings, status, result_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+            )
+            cursor = conn.execute(
+                sql,
                 (
                     result.get("period", {}).get("start", ""),
                     result.get("period", {}).get("end", ""),
@@ -503,22 +472,26 @@ class Storage:
 
     def get_analysis_runs(self, limit: int = 10) -> list[dict]:
         """Get recent analysis runs."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM analysis_runs ORDER BY created_at DESC LIMIT ?", (limit,)
-            ).fetchall()
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
+                "SELECT * FROM analysis_runs ORDER BY created_at DESC LIMIT ?"
+            )
+            rows = conn.execute(sql, (limit,)).fetchall()
             return [dict(row) for row in rows]
 
     # ── Balance Snapshots ──
 
     def save_balance_record(self, provider: str, balance: dict) -> int:
         """Save a balance snapshot."""
-        with self._connect() as conn:
-            cursor = conn.execute(
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """INSERT INTO balance_snapshots
                    (provider, available_amount, credit_amount, credit_balance,
                     owe_amount, currency, raw_data)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?)"""
+            )
+            cursor = conn.execute(
+                sql,
                 (
                     provider,
                     balance.get("available_amount", 0),
@@ -534,7 +507,7 @@ class Storage:
 
     def get_latest_balance(self) -> dict:
         """Get the latest balance for each provider."""
-        with self._connect() as conn:
+        with self._backend.connect() as conn:
             rows = conn.execute(
                 """SELECT provider, available_amount, credit_amount, credit_balance,
                           owe_amount, currency, snapshot_at
@@ -560,8 +533,8 @@ class Storage:
         currency: str = "CNY",
     ) -> int:
         """Save or update a monthly cost snapshot."""
-        with self._connect() as conn:
-            cursor = conn.execute(
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """INSERT INTO monthly_cost_snapshots
                    (year, month, provider, total_cost, currency,
                     service_breakdown, daily_avg, record_count)
@@ -570,7 +543,10 @@ class Storage:
                    total_cost=excluded.total_cost, currency=excluded.currency,
                    service_breakdown=excluded.service_breakdown,
                    daily_avg=excluded.daily_avg, record_count=excluded.record_count,
-                   snapshot_at=CURRENT_TIMESTAMP""",
+                   snapshot_at=CURRENT_TIMESTAMP"""
+            )
+            cursor = conn.execute(
+                sql,
                 (
                     year, month, provider, total_cost, currency,
                     json.dumps(service_breakdown, default=str),
@@ -582,15 +558,15 @@ class Storage:
 
     def get_monthly_snapshots(self, year: int, month: int) -> list[dict]:
         """Get monthly snapshots for a specific month."""
-        with self._connect() as conn:
-            rows = conn.execute(
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """SELECT year, month, provider, total_cost, currency,
                           service_breakdown, daily_avg, record_count, snapshot_at
                    FROM monthly_cost_snapshots
                    WHERE year = ? AND month = ?
-                   ORDER BY provider""",
-                (year, month),
-            ).fetchall()
+                   ORDER BY provider"""
+            )
+            rows = conn.execute(sql, (year, month)).fetchall()
             result = []
             for row in rows:
                 data = dict(row)
@@ -600,15 +576,15 @@ class Storage:
 
     def get_monthly_comparison(self, months_back: int = 12) -> list[dict]:
         """Get monthly snapshots for the last N months."""
-        with self._connect() as conn:
-            rows = conn.execute(
+        with self._backend.connect() as conn:
+            sql = self._backend.adapt_sql(
                 """SELECT year, month, provider, total_cost, currency,
                           service_breakdown, daily_avg, record_count
                    FROM monthly_cost_snapshots
                    ORDER BY year DESC, month DESC, provider
-                   LIMIT ?""",
-                (months_back * 10,),
-            ).fetchall()
+                   LIMIT ?"""
+            )
+            rows = conn.execute(sql, (months_back * 10,)).fetchall()
             result = []
             for row in rows:
                 data = dict(row)
@@ -620,41 +596,58 @@ class Storage:
 
     def get_stats(self) -> dict:
         """Get storage statistics."""
-        with self._connect() as conn:
-            stats = {}
-            for table in ["cost_records", "alerts", "recommendations", "budgets", "analysis_runs"]:
-                row = conn.execute(f"SELECT COUNT(*) as count FROM {table}").fetchone()
-                stats[table] = row["count"]
-            return stats
+        return self._backend.get_stats()
 
     # ── Helpers ──
 
-    def _row_to_cost_record(self, row: sqlite3.Row) -> CostRecord:
+    def _row_to_cost_record(self, row) -> CostRecord:
+        record_date = row["record_date"]
+        if isinstance(record_date, date) and not isinstance(record_date, datetime):
+            date_val = record_date
+        elif isinstance(record_date, datetime):
+            date_val = record_date.date()
+        else:
+            date_val = date.fromisoformat(str(record_date))
+
+        gran = row["granularity"] or "daily"
+        if hasattr(gran, 'value'):
+            gran = gran.value if hasattr(gran, 'value') else str(gran)
+
         return CostRecord(
             provider=row["provider"],
             account_id=row["account_id"],
             service_name=row["service_name"],
             region=row["region"] or "",
-            cost=row["cost"],
+            cost=float(row["cost"]),
             currency=row["currency"] or "USD",
-            usage_amount=row["usage_amount"] or 0.0,
+            usage_amount=float(row["usage_amount"] or 0),
             usage_unit=row["usage_unit"] or "",
-            tags=json.loads(row["tags"] or "{}"),
-            date=date.fromisoformat(row["record_date"]),
-            granularity=Granularity(row["granularity"] or "daily"),
+            tags=json.loads(str(row["tags"] or "{}")),
+            date=date_val,
+            granularity=Granularity(str(gran)),
         )
 
-    def _row_to_budget(self, row: sqlite3.Row) -> Budget:
+    def _row_to_budget(self, row) -> Budget:
+        start_date = row["start_date"]
+        if start_date is None:
+            sd = date.today()
+        elif isinstance(start_date, date) and not isinstance(start_date, datetime):
+            sd = start_date
+        elif isinstance(start_date, datetime):
+            sd = start_date.date()
+        else:
+            sd = date.fromisoformat(str(start_date))
+
         return Budget(
             name=row["name"],
-            amount=row["amount"],
+            amount=float(row["amount"]),
             currency=row["currency"] or "USD",
             period=BudgetPeriod(row["period"] or "monthly"),
             provider=row["provider"],
             service_name=row["service_name"],
-            tags=json.loads(row["tags"] or "{}"),
-            alert_thresholds=json.loads(row["alert_thresholds"] or "[50.0, 80.0, 100.0]"),
-            start_date=date.fromisoformat(row["start_date"]) if row["start_date"] else date.today(),
+            tags=json.loads(str(row["tags"] or "{}")),
+            alert_thresholds=json.loads(str(row["alert_thresholds"] or "[50.0, 80.0, 100.0]")),
+            start_date=sd,
         )
 
 
@@ -662,8 +655,8 @@ class Storage:
 _storage: Storage | None = None
 
 
-def get_storage(db_path: str = "costlens.db") -> Storage:
+def get_storage() -> Storage:
     global _storage
     if _storage is None:
-        _storage = Storage(db_path)
+        _storage = Storage()
     return _storage

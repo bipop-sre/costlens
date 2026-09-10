@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     tencent_cloud_region: str = "ap-guangzhou"
 
 
+    # Database (sqlite or oceanbase)
+    db_type: str = "sqlite"
+    db_path: str = "costlens.db"
+    oceanbase_host: str = "127.0.0.1"
+    oceanbase_port: int = 2881
+    oceanbase_user: str = "root"
+    oceanbase_password: str = ""
+    oceanbase_database: str = "costlens"
+
     # Alerts
     alert_budget_threshold_pct: float = 80.0
     alert_cost_anomaly_threshold: float = 20.0

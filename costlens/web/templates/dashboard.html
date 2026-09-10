@@ -82,7 +82,7 @@ body {
 }
 .chart-box h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 .chart-container { width: 100%; height: 320px; }
-.chart-container.tall { height: 400px; }
+.chart-container.tall { height: 500px; }
 
 .full-chart { margin-bottom: 24px; }
 
@@ -258,28 +258,36 @@ tr:hover td { background: rgba(99,102,241,0.05); }
 
   <!-- Alerts Tab -->
 
+  <div id="tab-alerts" style="display:none">
+    <div class="table-box">
+      <h3>🔔 告警记录</h3>
+      <table id="alertTable">
+        <thead><tr><th>时间</th><th>级别</th><th>标题</th><th>详情</th><th>厂商</th><th>当前值</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+
   <!-- Budgets Tab -->
   <div id="tab-budgets" style="display:none">
     <div class="table-box">
       <h3>
         💰 预算管理
         <div class="table-controls">
-          <button class="btn btn-primary" onclick="showBudgetForm()">➕ 新建预算</button>
-          <button class="btn" onclick="checkBudgets()">🔍 检查预算</button>
+          <button class="btn btn-primary" onclick="showBudgetForm()" style="font-size:13px; padding:6px 14px;">+ 新建预算</button>
         </div>
       </h3>
       <table id="budgetTable">
-        <thead><tr><th>预算名称</th><th>金额</th><th>范围</th><th>当前花费</th><th>使用率</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div id="tab-alerts" style="display:none">
-    <div class="table-box">
-      <h3>🔔 告警记录</h3>
-      <table id="alertTable">
-        <thead><tr><th>时间</th><th>级别</th><th>标题</th><th>详情</th><th>厂商</th><th>当前值</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr>
+          <th>名称</th>
+          <th>预算金额</th>
+          <th>已花费</th>
+          <th>剩余</th>
+          <th>使用率</th>
+          <th>状态</th>
+          <th>操作</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -337,9 +345,12 @@ async function submitAuth() {
   }
 }
 
-// Update fetchJSON to include auth token
-const originalFetchJSON = fetchJSON;
-fetchJSON = async function(url) {
+
+
+
+const API = '';
+
+async function fetchJSON(url) {
   const res = await fetch(API + url, {
     headers: authToken ? {'Authorization': 'Bearer ' + authToken} : {}
   });
@@ -349,10 +360,8 @@ fetchJSON = async function(url) {
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
-};
+}
 
-
-const API = '';
 let overviewData = null;
 let currentTab = 'overview';
 
@@ -368,17 +377,17 @@ function showToast(msg, isError=false) {
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((t,i) => {
-    const tabs = ['overview','daily','services','alerts'];
+    const tabs = ['overview','daily','services','alerts','budgets'];
     t.classList.toggle('active', tabs[i] === tab);
   });
-  ['overview','daily','services','alerts'].forEach(t => {
+  ['overview','daily','services','alerts','budgets'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === tab ? '' : 'none';
   });
   if (tab === 'daily') loadDailyData();
   if (tab === 'services') loadServiceData();
   if (tab === 'alerts') loadAlerts();
   if (tab === 'budgets') loadBudgets();
-}
+  }
 
 function populateMonthSelects() {
   const now = new Date();
@@ -397,11 +406,7 @@ function populateMonthSelects() {
   });
 }
 
-async function fetchJSON(url) {
-  const res = await fetch(API + url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
+
 
 async function loadOverview() {
   try {
@@ -434,7 +439,7 @@ async function loadDailyData() {
   const provider = document.getElementById('dailyProvider').value;
   if (!y) return;
   try {
-    const data = await fetchJSON(`/api/cost/daily?year=${y}&month=${m}&provider=${provider||''}`);
+    const data = await fetchJSON(`/api/daily?year=${y}&month=${m}&provider=${provider||''}`);
     renderDaily(data);
   } catch (e) {
     showToast('加载每日数据失败: ' + e.message, true);
@@ -448,7 +453,7 @@ async function loadServiceData() {
   const provider = document.getElementById('serviceProvider').value;
   if (!y) return;
   try {
-    const data = await fetchJSON(`/api/cost/services?year=${y}&month=${m}&provider=${provider||''}`);
+    const data = await fetchJSON(`/api/services?year=${y}&month=${m}&provider=${provider||''}`);
     renderServices(data);
   } catch (e) {
     showToast('加载服务数据失败: ' + e.message, true);
@@ -486,45 +491,103 @@ async function acknowledgeAlert(id) {
   loadAlerts();
 }
 
+
+function renderDailyCostChart(dailyCosts) {
+  const el = document.getElementById('trendChart');
+  if (!el) return;
+  const chart = echarts.init(el);
+  const dates = dailyCosts.map(d => d.date.substring(5));
+  const costs = dailyCosts.map(d => d.cost);
+  chart.setOption({
+    tooltip: { trigger:'axis', backgroundColor:'#1a1d29', borderColor:'#2a2e3f', textStyle:{color:'#e4e6eb'} },
+    grid: { left:'3%', right:'4%', bottom:'3%', containLabel:true },
+    xAxis: { type:'category', data:dates, axisLabel:{color:'#8b8fa3',rotate:45}, axisLine:{lineStyle:{color:'#2a2e3f'}} },
+    yAxis: { type:'value', axisLabel:{color:'#8b8fa3', formatter:v=>'¥'+v.toLocaleString()}, splitLine:{lineStyle:{color:'#2a2e3f'}} },
+    series: [{ name:'日成本', type:'bar', data:costs, itemStyle:{color:'#6366f1', borderRadius:[4,4,0,0]} }],
+  });
+  window.addEventListener('resize', () => chart.resize());
+}
+
+function renderProviderPie(providers, total) {
+  const el = document.getElementById('pieChart');
+  if (!el) return;
+  const chart = echarts.init(el);
+  const providerNames = {'alibaba': '阿里云', 'tencent': '腾讯云'};
+  const colors = ['#6366f1', '#22c55e'];
+  const data = Object.entries(providers).map(([k,v]) => ({
+    name: v.name || providerNames[k] || k,
+    value: v.cost
+  }));
+  chart.setOption({
+    tooltip: { trigger:'item', backgroundColor:'#1a1d29', borderColor:'#2a2e3f', textStyle:{color:'#e4e6eb'}, formatter:p=>`${p.name}: ¥${p.value.toLocaleString()} (${p.percent}%)` },
+    color: colors,
+    series: [{
+      type:'pie', radius:['45%','75%'], center:['50%','55%'],
+      label:{ color:'#e4e6eb', formatter:'{b}\n{d}%' },
+      labelLine:{ lineStyle:{color:'#2a2e3f'} },
+      data: data,
+      emphasis: { itemStyle:{ shadowBlur:10, shadowColor:'rgba(0,0,0,0.5)' } },
+    }],
+  });
+  window.addEventListener('resize', () => chart.resize());
+}
 function renderOverview() {
   const d = overviewData;
   if (!d) return;
 
-  document.getElementById('totalCost').textContent = `¥${fmt(d.current_month.total_cost)}`;
-  document.getElementById('prevCost').textContent = `¥${fmt(d.prev_month_cost)}`;
+  document.getElementById('totalCost').textContent = `¥${fmt(d.total_cost)}`;
 
   if (d.mom_change != null) {
     const el = document.getElementById('momChange');
     const isUp = d.mom_change > 0;
     el.textContent = `环比${isUp?'↑':'↓'} ${isUp?'+':''}${d.mom_change}%`;
     el.className = 'sub ' + (isUp ? 'up' : 'down');
+  } else {
+    document.getElementById('momChange').textContent = '暂无上月数据';
+    document.getElementById('momChange').className = 'sub';
   }
 
-  const providers = d.current_month.providers;
-  const ali = providers.alibaba;
-  const tx = providers.tencent;
+  const ali = d.providers.alibaba;
+  const tx = d.providers.tencent;
   if (ali) {
+    const aliPct = d.total_cost > 0 ? (ali.cost / d.total_cost * 100).toFixed(1) : 0;
     document.getElementById('aliBalance').textContent = `¥${fmt(ali.cost)}`;
-    document.getElementById('aliUpdated').textContent = `占比 ${ali.pct}%`;
+    document.getElementById('aliUpdated').textContent = `占比 ${aliPct}%`;
   }
   if (tx) {
+    const txPct = d.total_cost > 0 ? (tx.cost / d.total_cost * 100).toFixed(1) : 0;
     document.getElementById('txBalance').textContent = `¥${fmt(tx.cost)}`;
-    document.getElementById('txUpdated').textContent = `占比 ${tx.pct}%`;
+    document.getElementById('txUpdated').textContent = `占比 ${txPct}%`;
   }
 
-  renderTrendChart(d.trend);
-  renderPieChart(d.current_month.providers);
-  renderTopServices(d.top_services, d.current_month.total_cost);
+  // Calculate and display prev month cost
+  if (d.mom_change != null && d.total_cost > 0) {
+    const prevCost = d.total_cost / (1 + d.mom_change / 100);
+    document.getElementById('prevCost').textContent = `¥${fmt(prevCost)}`;
+    document.getElementById('prevLabel').textContent = '上月成本';
+    document.getElementById('prevLabel').className = 'sub neutral';
+  }
+
+  // Render top services as list
+  renderTopServices(d.top_services, d.total_cost);
+
+  // Render provider pie chart
+  renderProviderPie(d.providers, d.total_cost);
+
+  // Render daily cost chart
+  if (d.daily_costs && d.daily_costs.length > 0) {
+    renderDailyCostChart(d.daily_costs);
+  }
 }
 
 function renderBalance(balances) {
   balances.forEach(b => {
     if (b.provider === 'alibaba') {
       document.getElementById('aliBalance').textContent = `¥${fmt(b.available_amount)}`;
-      document.getElementById('aliUpdated').textContent = `更新于 ${b.updated_at || '-'}`;
+      document.getElementById('aliUpdated').textContent = `更新于 ${b.updated || '-'}`;
     } else if (b.provider === 'tencent') {
       document.getElementById('txBalance').textContent = `¥${fmt(b.available_amount)}`;
-      document.getElementById('txUpdated').textContent = `更新于 ${b.updated_at || '-'}`;
+      document.getElementById('txUpdated').textContent = `更新于 ${b.updated || '-'}`;
     }
   });
 }
@@ -578,7 +641,7 @@ function renderTopServices(services, total) {
 
   chart.setOption({
     tooltip: { trigger:'axis', backgroundColor:'#1a1d29', borderColor:'#2a2e3f', textStyle:{color:'#e4e6eb'}, formatter:p=>`${p[0].name}: ¥${p[0].value.toLocaleString()}` },
-    grid: { left:'20%', right:'8%', bottom:'3%', top:'3%', containLabel:false },
+    grid: { left:'20%', right:'8%', bottom:'8%', top:'3%', containLabel:false },
     xAxis: { type:'value', axisLabel:{color:'#8b8fa3', formatter:v=>'¥'+v.toLocaleString()}, splitLine:{lineStyle:{color:'#2a2e3f'}} },
     yAxis: { type:'category', data:names, axisLabel:{color:'#e4e6eb',fontSize:12}, axisLine:{lineStyle:{color:'#2a2e3f'}} },
     series: [{
@@ -593,8 +656,8 @@ function renderTopServices(services, total) {
 function renderDaily(data) {
   const chart = echarts.init(document.getElementById('dailyChart'));
   const dates = data.daily.map(d => d.date.substring(5));
-  const aliData = data.daily.map(d => d.providers.alibaba || 0);
-  const txData = data.daily.map(d => d.providers.tencent || 0);
+  const aliData = data.daily.map(d => d.alibaba || 0);
+  const txData = data.daily.map(d => d.tencent || 0);
 
   chart.setOption({
     tooltip: { trigger:'axis', backgroundColor:'#1a1d29', borderColor:'#2a2e3f', textStyle:{color:'#e4e6eb'} },
@@ -613,8 +676,8 @@ function renderDaily(data) {
   tbody.innerHTML = data.daily.map(d => `
     <tr>
       <td>${d.date}</td>
-      <td>¥${fmt(d.providers.alibaba||0)}</td>
-      <td>¥${fmt(d.providers.tencent||0)}</td>
+      <td>¥${fmt(d.alibaba||0)}</td>
+      <td>¥${fmt(d.tencent||0)}</td>
       <td><strong>¥${fmt(d.total)}</strong></td>
     </tr>
   `).join('');
@@ -622,21 +685,26 @@ function renderDaily(data) {
 
 function renderServices(data) {
   const tbody = document.querySelector('#serviceTable tbody');
-  const allServices = [];
-  Object.entries(data.by_provider).forEach(([p, pd]) => {
-    pd.services.forEach(s => {
-      allServices.push({...s, providerName: pd.name});
-    });
-  });
+  const providerNames = {'alibaba': '阿里云', 'tencent': '腾讯云'};
+  const allServices = (data.services || []).map(s => ({
+    service: s.service,
+    cost: s.cost,
+    provider: s.provider,
+    providerName: providerNames[s.provider] || s.provider,
+    mom_cost: s.mom_cost,
+    mom_change: s.mom_change,
+    mom_change_pct: s.mom_change_pct,
+  }));
   allServices.sort((a,b) => b.cost - a.cost);
   const total = allServices.reduce((s,x) => s+x.cost, 0);
   const maxCost = allServices.length > 0 ? allServices[0].cost : 1;
 
   // Calculate summary totals
   const totalCost = allServices.reduce((s,x) => s + (x.cost||0), 0);
-  const totalMomCost = allServices.reduce((s,x) => s + (x.mom_cost||0), 0);
-  const totalMomChange = totalCost - totalMomCost;
-  const totalMomPct = totalMomCost > 0 ? ((totalCost - totalMomCost) / totalMomCost * 100) : null;
+  const totalMomCost = allServices.reduce((s,x) => s + (x.mom_cost ?? 0), 0);
+  const hasMomData = allServices.some(x => x.mom_cost !== null && x.mom_cost !== undefined);
+  const totalMomChange = hasMomData ? totalCost - totalMomCost : null;
+  const totalMomPct = (hasMomData && totalMomCost > 0) ? ((totalCost - totalMomCost) / totalMomCost * 100) : null;
 
   let rows = allServices.map((s, i) => {
     let momHtml = '';
@@ -710,96 +778,19 @@ function renderAlerts(alerts) {
 }
 
 
-// ── Budget Management ──
+
+
+
+
+const PROVIDER_NAMES = {alibaba:'阿里云',tencent:'腾讯云',aws:'AWS',azure:'Azure',gcp:'GCP'};
+
+async function loadAll() {
+  populateMonthSelects();
+  await Promise.all([loadOverview(), loadBalance(), loadSyncStatus()]);
+}
+loadAll();
+
 let editingBudget = null;
-
-function showBudgetForm(budget = null) {
-  editingBudget = budget;
-  document.getElementById('budgetFormTitle').textContent = budget ? '编辑预算' : '新建预算';
-  
-  if (budget) {
-    document.getElementById('budgetName').value = budget.name;
-    document.getElementById('budgetName').disabled = true;
-    document.getElementById('budgetAmount').value = budget.amount;
-    document.getElementById('budgetPeriod').value = budget.period;
-    document.getElementById('budgetProvider').value = budget.provider || '';
-    document.getElementById('budgetService').value = budget.service_name || '';
-    document.getElementById('budgetThresholds').value = budget.alert_thresholds.join(',');
-  } else {
-    document.getElementById('budgetForm').reset();
-    document.getElementById('budgetName').disabled = false;
-    document.getElementById('budgetThresholds').value = '50,80,100';
-  }
-  
-  document.getElementById('budgetFormModal').style.display = 'flex';
-}
-
-function hideBudgetForm() {
-  document.getElementById('budgetFormModal').style.display = 'none';
-  editingBudget = null;
-}
-
-async function submitBudget(event) {
-  event.preventDefault();
-  
-  const data = {
-    name: document.getElementById('budgetName').value,
-    amount: parseFloat(document.getElementById('budgetAmount').value),
-    currency: 'CNY',
-    period: document.getElementById('budgetPeriod').value,
-    provider: document.getElementById('budgetProvider').value || null,
-    service_name: document.getElementById('budgetService').value || null,
-    alert_thresholds: document.getElementById('budgetThresholds').value.split(',').map(s => parseFloat(s.trim())),
-  };
-  
-  try {
-    const url = editingBudget ? `/api/budgets/${encodeURIComponent(editingBudget.name)}` : '/api/budgets';
-    const method = editingBudget ? 'PUT' : 'POST';
-    
-    const res = await fetch(API + url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authToken ? 'Bearer ' + authToken : '',
-      },
-      body: JSON.stringify(data),
-    });
-    
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Failed to save budget');
-    }
-    
-    showToast(editingBudget ? '预算已更新' : '预算已创建');
-    hideBudgetForm();
-    loadBudgets();
-  } catch (e) {
-    showToast('保存失败: ' + e.message, true);
-  }
-}
-
-async function deleteBudget(name) {
-  if (!confirm(`确定要删除预算 "${name}" 吗？`)) return;
-  
-  try {
-    const res = await fetch(API + `/api/budgets/${encodeURIComponent(name)}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': authToken ? 'Bearer ' + authToken : '',
-      },
-    });
-    
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Failed to delete budget');
-    }
-    
-    showToast('预算已删除');
-    loadBudgets();
-  } catch (e) {
-    showToast('删除失败: ' + e.message, true);
-  }
-}
 
 async function loadBudgets() {
   try {
@@ -810,94 +801,118 @@ async function loadBudgets() {
   }
 }
 
-async function checkBudgets() {
-  try {
-    const res = await fetch(API + '/api/budgets/check', {
-      method: 'POST',
-      headers: {
-        'Authorization': authToken ? 'Bearer ' + authToken : '',
-      },
-    });
-    
-    const data = await res.json();
-    if (data.alerts_created > 0) {
-      showToast(`预算检查完成，创建了 ${data.alerts_created} 条告警`);
-    } else {
-      showToast('预算检查完成，所有预算正常');
-    }
-    
-    loadBudgets();
-    loadAlerts();
-  } catch (e) {
-    showToast('检查失败: ' + e.message, true);
-  }
-}
-
 function renderBudgets(budgets) {
   const tbody = document.querySelector('#budgetTable tbody');
-  
   if (budgets.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-dim);padding:40px;">暂无预算，点击"新建预算"开始设置</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:40px; color:#666">暂无预算，点击"+ 新建预算"添加</td></tr>';
     return;
   }
-  
   tbody.innerHTML = budgets.map(b => {
-    const statusColors = {
-      'on_track': 'var(--green)',
-      'caution': 'var(--orange)',
-      'warning': 'var(--orange)',
-      'exceeded': 'var(--red)',
-    };
-    const statusLabels = {
-      'on_track': '正常',
-      'caution': '注意',
-      'warning': '警告',
-      'exceeded': '超支',
-    };
-    
-    let scope = '全部';
-    if (b.provider) {
-      scope = PROVIDER_NAMES[b.provider] || b.provider;
-      if (b.service_name) {
-        scope += ' - ' + b.service_name;
-      }
-    }
-    
-    const barWidth = Math.min(100, b.utilization);
-    const barColor = statusColors[b.status];
-    
+    const statusColor = {on_track:'#22c55e', caution:'#f59e0b', warning:'#ef4444', exceeded:'#dc2626'}[b.status] || '#888';
+    const statusText = {on_track:'正常', caution:'注意', warning:'警告', exceeded:'超支'}[b.status] || b.status;
     return `
       <tr>
-        <td><strong>${b.name}</strong></td>
+        <td>${b.name}</td>
         <td>¥${fmt(b.amount)}</td>
-        <td>${scope}</td>
         <td>¥${fmt(b.current_spend)}</td>
+        <td>¥${fmt(b.remaining)}</td>
         <td>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <div style="flex:1; height:8px; background:var(--bg); border-radius:4px; overflow:hidden;">
-              <div style="width:${barWidth}%; height:100%; background:${barColor}; transition:width 0.3s;"></div>
-            </div>
-            <span style="font-weight:600; color:${barColor};">${b.utilization}%</span>
+          <div style="width:100px; height:8px; background:#2a2e3f; border-radius:4px; overflow:hidden; display:inline-block; vertical-align:middle">
+            <div style="width:${Math.min(b.utilization,100)}%; height:100%; background:${statusColor}; transition:width 0.3s"></div>
           </div>
+          <span style="margin-left:6px; color:${statusColor}; font-weight:600">${b.utilization}%</span>
         </td>
-        <td><span style="color:${barColor}; font-weight:600;">${statusLabels[b.status]}</span></td>
+        <td><span style="color:${statusColor}; font-weight:600">${statusText}</span></td>
         <td>
-          <button class="btn" onclick='showBudgetForm(${JSON.stringify(b).replace(/'/g, "\'")})' style="padding:4px 12px; font-size:12px;">编辑</button>
-          <button class="btn" onclick="deleteBudget('${b.name}')" style="padding:4px 12px; font-size:12px;">删除</button>
+          <button class="btn btn-sm" onclick="editBudget('${b.name}')">编辑</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteBudget('${b.name}')">删除</button>
         </td>
       </tr>
     `;
   }).join('');
 }
 
-
-const PROVIDER_NAMES = {alibaba:'阿里云',tencent:'腾讯云',aws:'AWS',azure:'Azure',gcp:'GCP'};
-
-async function loadAll() {
-  populateMonthSelects();
-  await Promise.all([loadOverview(), loadBalance(), loadSyncStatus()]);
+function showBudgetForm(budget = null) {
+  editingBudget = budget;
+  document.getElementById('budgetModalTitle').textContent = budget ? '编辑预算' : '新建预算';
+  document.getElementById('budgetModal').style.display = 'flex';
+  if (budget) {
+    document.getElementById('budgetName').value = budget.name;
+    document.getElementById('budgetName').disabled = true;
+    document.getElementById('budgetAmount').value = budget.amount;
+    document.getElementById('budgetProvider').value = budget.provider || '';
+    document.getElementById('budgetService').value = budget.service_name || '';
+    document.getElementById('budgetThresholds').value = budget.alert_thresholds.join(',');
+  } else {
+    document.getElementById('budgetName').disabled = false;
+    document.getElementById('budgetAmount').value = '';
+    document.getElementById('budgetProvider').value = '';
+    document.getElementById('budgetService').value = '';
+    document.getElementById('budgetThresholds').value = '50,80,100';
+  }
 }
-loadAll();
+
+function closeBudgetModal() {
+  document.getElementById('budgetModal').style.display = 'none';
+  editingBudget = null;
+}
+
+async function saveBudget(event) {
+  event.preventDefault();
+  const data = {
+    name: document.getElementById('budgetName').value,
+    amount: parseFloat(document.getElementById('budgetAmount').value),
+    currency: 'CNY',
+    period: 'monthly',
+    provider: document.getElementById('budgetProvider').value || null,
+    service_name: document.getElementById('budgetService').value || null,
+    alert_thresholds: document.getElementById('budgetThresholds').value.split(',').map(s => parseFloat(s.trim())),
+  };
+  try {
+    const url = editingBudget ? '/api/budgets/' + encodeURIComponent(editingBudget.name) : '/api/budgets';
+    const method = editingBudget ? 'PUT' : 'POST';
+    const res = await fetch(API + url, {
+      method,
+      headers: {'Content-Type':'application/json', 'Authorization': authToken ? 'Bearer ' + authToken : ''},
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '保存失败');
+    }
+    closeBudgetModal();
+    showToast('预算保存成功');
+    loadBudgets();
+  } catch (e) {
+    showToast('保存失败: ' + e.message, true);
+  }
+}
+
+async function editBudget(name) {
+  try {
+    const data = await fetchJSON('/api/budgets');
+    const budget = data.budgets.find(b => b.name === name);
+    if (budget) showBudgetForm(budget);
+  } catch (e) {
+    showToast('编辑失败: ' + e.message, true);
+  }
+}
+
+async function deleteBudget(name) {
+  if (!confirm('确定删除预算 "' + name + '" 吗？')) return;
+  try {
+    const res = await fetch(API + '/api/budgets/' + encodeURIComponent(name), {
+      method: 'DELETE',
+      headers: {'Authorization': authToken ? 'Bearer ' + authToken : ''},
+    });
+    if (!res.ok) throw new Error('删除失败');
+    showToast('预算已删除');
+    loadBudgets();
+  } catch (e) {
+    showToast('删除失败: ' + e.message, true);
+  }
+}
+
 </script>
 
 <!-- Auth Modal -->
@@ -915,46 +930,37 @@ loadAll();
 
 
 <!-- Budget Form Modal -->
-<div id="budgetFormModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; align-items:center; justify-content:center;">
-  <div style="background:var(--card); border:1px solid var(--border); border-radius:12px; padding:32px; max-width:500px; width:90%;">
-    <h2 id="budgetFormTitle" style="margin-bottom:24px; color:var(--text);">新建预算</h2>
-    <form id="budgetForm" onsubmit="submitBudget(event)">
-      <div style="margin-bottom:16px;">
-        <label style="display:block; color:var(--text-dim); margin-bottom:8px;">预算名称 *</label>
-        <input type="text" id="budgetName" required style="width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
+<div id="budgetModal" class="modal" style="display:none">
+  <div class="modal-content" style="max-width:500px">
+    <h3 id="budgetModalTitle">新建预算</h3>
+    <form onsubmit="saveBudget(event)">
+      <div class="form-group">
+        <label>名称</label>
+        <input type="text" id="budgetName" required>
       </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block; color:var(--text-dim); margin-bottom:8px;">预算金额 (CNY) *</label>
-        <input type="number" id="budgetAmount" required step="0.01" min="0" style="width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
+      <div class="form-group">
+        <label>金额</label>
+        <input type="number" id="budgetAmount" required step="0.01">
       </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block; color:var(--text-dim); margin-bottom:8px;">周期</label>
-        <select id="budgetPeriod" style="width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
-          <option value="monthly">月度</option>
-          <option value="quarterly">季度</option>
-          <option value="yearly">年度</option>
-        </select>
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block; color:var(--text-dim); margin-bottom:8px;">厂商（可选）</label>
-        <select id="budgetProvider" style="width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
-          <option value="">全部厂商</option>
+      <div class="form-group">
+        <label>厂商</label>
+        <select id="budgetProvider">
+          <option value="">全部</option>
           <option value="alibaba">阿里云</option>
           <option value="tencent">腾讯云</option>
         </select>
       </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block; color:var(--text-dim); margin-bottom:8px;">服务（可选）</label>
-        <input type="text" id="budgetService" placeholder="留空表示该厂商全部服务" style="width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
+      <div class="form-group">
+        <label>服务</label>
+        <input type="text" id="budgetService" placeholder="可选">
       </div>
-      <div style="margin-bottom:24px;">
-        <label style="display:block; color:var(--text-dim); margin-bottom:8px;">告警阈值 (%)</label>
-        <input type="text" id="budgetThresholds" value="50,80,100" style="width:100%; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text);">
-        <small style="color:var(--text-dim); margin-top:4px; display:block;">用逗号分隔，例如: 50,80,100</small>
+      <div class="form-group">
+        <label>告警阈值 (%)</label>
+        <input type="text" id="budgetThresholds" value="50,80,100">
       </div>
-      <div style="display:flex; gap:12px;">
-        <button type="submit" style="flex:1; padding:12px; background:var(--accent); color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:14px;">保存</button>
-        <button type="button" onclick="hideBudgetForm()" style="flex:1; padding:12px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; cursor:pointer; font-size:14px;">取消</button>
+      <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:20px">
+        <button type="button" class="btn" onclick="closeBudgetModal()">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
       </div>
     </form>
   </div>
