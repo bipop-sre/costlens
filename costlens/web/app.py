@@ -38,6 +38,76 @@ ENABLED_PROVIDERS = ["alibaba", "tencent"]
 app.include_router(budget_router)
 
 
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    from fastapi.responses import PlainTextResponse
+    db = _get_db()
+
+    lines = []
+    lines.append("# HELP costlens_up Whether the service is up")
+    lines.append("# TYPE costlens_up gauge")
+    lines.append("costlens_up 1")
+
+    # Record counts
+    lines.append("# HELP costlens_records_total Total cost records in database")
+    lines.append("# TYPE costlens_records_total gauge")
+    try:
+        row = db.execute(_adapt("SELECT COUNT(*) FROM cost_records")).fetchone()
+        lines.append(f"costlens_records_total {row[0] or 0}")
+    except Exception:
+        lines.append("costlens_records_total 0")
+
+    # Record counts by provider
+    lines.append("# HELP costlens_records_by_provider Cost records per provider")
+    lines.append("# TYPE costlens_records_by_provider gauge")
+    try:
+        rows = db.execute(_adapt("SELECT provider, COUNT(*) FROM cost_records GROUP BY provider")).fetchall()
+        for r in rows:
+            lines.append(f'costlens_records_by_provider{{provider="{r[0]}"}} {r[1]}')
+    except Exception:
+        pass
+
+    # Alert counts
+    lines.append("# HELP costlens_alerts_total Total alerts by severity")
+    lines.append("# TYPE costlens_alerts_total gauge")
+    try:
+        rows = db.execute(_adapt("SELECT severity, COUNT(*) FROM alerts GROUP BY severity")).fetchall()
+        for r in rows:
+            lines.append(f'costlens_alerts_total{{severity="{r[0]}"}} {r[1]}')
+    except Exception:
+        pass
+
+    # Unacknowledged alerts
+    lines.append("# HELP costlens_alerts_unacknowledged Unacknowledged alerts count")
+    lines.append("# TYPE costlens_alerts_unacknowledged gauge")
+    try:
+        row = db.execute(_adapt("SELECT COUNT(*) FROM alerts WHERE acknowledged = 0")).fetchone()
+        lines.append(f"costlens_alerts_unacknowledged {row[0] or 0}")
+    except Exception:
+        lines.append("costlens_alerts_unacknowledged 0")
+
+    # Latest balance
+    lines.append("# HELP costlens_balance_available Available balance by provider")
+    lines.append("# TYPE costlens_balance_available gauge")
+    try:
+        rows = db.execute(
+            """SELECT provider, available_amount FROM balance_snapshots
+               WHERE snapshot_at IN (
+                   SELECT MAX(snapshot_at) FROM balance_snapshots GROUP BY provider
+               )
+               ORDER BY provider"""
+        ).fetchall()
+        for r in rows:
+            lines.append(f'costlens_balance_available{{provider="{r[0]}"}} {r[1] or 0:.2f}')
+    except Exception:
+        pass
+
+    db.close()
+    text = "\n".join(lines) + "\n"
+    return PlainTextResponse(content=text, media_type="text/plain; version=0.0.4")
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
