@@ -4,12 +4,15 @@ FROM harbor.ymt.io/inf/python:3.11-slim
 # Set working directory
 WORKDIR /app
 
+# Disable pip progress bar globally (fixes threading crash in restricted CI environments)
+ENV PIP_PROGRESS_BAR=off PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip and install dependencies
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --progress-bar off -r requirements.txt
+# Upgrade pip (old bundled rich has threading issues) then install deps
+RUN python -m pip install --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
