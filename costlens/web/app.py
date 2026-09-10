@@ -38,6 +38,22 @@ ENABLED_PROVIDERS = ["alibaba", "tencent"]
 app.include_router(budget_router)
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    db_ok = True
+    try:
+        db = _get_db()
+        db.execute("SELECT 1")
+        db.close()
+    except Exception:
+        db_ok = False
+
+    status = "healthy" if db_ok else "degraded"
+    return {"status": status, "database": "ok" if db_ok else "error"}
+
+
+
 
 def _get_db():
     backend = get_backend()
