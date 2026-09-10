@@ -1,0 +1,31 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  IMAGE_TAG: $HARBOR_REGISTRY/fe/$SERVICE_ID:$CI_COMMIT_SHORT_SHA
+
+build:
+  stage: build
+  script:
+    - docker login -u "$HARBOR_USER" -p "$HARBOR_PASSWORD" $HARBOR_REGISTRY
+    - docker build -t $IMAGE_TAG ./
+    - docker push $IMAGE_TAG
+  only:
+    - develop
+    - main
+deploy:
+  stage: deploy
+  when: manual
+  script:
+    - export K8S_DP_NAMESPACE="sys"
+    - export K8S_DP_SERVICE_NAME="$SERVICE_ID"
+    - export BUILD_NUMBER="$CI_COMMIT_SHORT_SHA"
+    - export CANARY_PLUGIN_NAME="$SERVICE_ID"
+    - echo $K8S_DP_NAMESPACE $K8S_DP_SERVICE_NAME $BUILD_NUMBER $CANARY_PLUGIN_NAME
+    - cd /home/farmer/newk8s/prod_sh && /bin/bash $SERVICE_ID.sh > /home/farmer/newk8s/tmp/$SERVICE_ID.yaml
+    - kubectl apply -f /home/farmer/newk8s/tmp/$SERVICE_ID.yaml
+    - kubectl rollout status deployment/$SERVICE_ID -n sys
+  only:
+    - develop
+    - main
