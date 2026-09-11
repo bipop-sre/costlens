@@ -18,63 +18,61 @@ def migrate_oceanbase():
 
     conn = backend.raw_connect()
     try:
-        cursor = conn.cursor()
-
-        # Check if columns already exist
-        cursor.execute("""
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = %s
-              AND TABLE_NAME = 'cost_records'
-              AND COLUMN_NAME IN ('instance_id', 'instance_name')
-        """, (backend._database,))
-
-        existing = [row[0] for row in cursor.fetchall()]
-
-        if 'instance_id' not in existing:
-            logger.info("Adding instance_id column...")
-            cursor.execute("""
+        # Add instance_id column (ignore if exists)
+        logger.info("Adding instance_id column...")
+        try:
+            conn.execute("""
                 ALTER TABLE cost_records
                 ADD COLUMN instance_id VARCHAR(256) DEFAULT ''
             """)
-            logger.info("instance_id column added")
-        else:
-            logger.info("instance_id column already exists")
+            logger.info("✓ instance_id column added")
+        except Exception as e:
+            if 'Duplicate column' in str(e) or 'already exists' in str(e).lower():
+                logger.info("✓ instance_id column already exists")
+            else:
+                raise
 
-        if 'instance_name' not in existing:
-            logger.info("Adding instance_name column...")
-            cursor.execute("""
+        # Add instance_name column (ignore if exists)
+        logger.info("Adding instance_name column...")
+        try:
+            conn.execute("""
                 ALTER TABLE cost_records
                 ADD COLUMN instance_name VARCHAR(256) DEFAULT ''
             """)
-            logger.info("instance_name column added")
-        else:
-            logger.info("instance_name column already exists")
+            logger.info("✓ instance_name column added")
+        except Exception as e:
+            if 'Duplicate column' in str(e) or 'already exists' in str(e).lower():
+                logger.info("✓ instance_name column already exists")
+            else:
+                raise
 
         # Update unique key to include instance_id
         logger.info("Updating unique key to include instance_id...")
         try:
-            cursor.execute("ALTER TABLE cost_records DROP INDEX uk_cost_record")
-            cursor.execute("""
+            conn.execute("ALTER TABLE cost_records DROP INDEX uk_cost_record")
+            conn.execute("""
                 ALTER TABLE cost_records
                 ADD UNIQUE KEY uk_cost_record (
                     provider, account_id, service_name, region,
                     record_date, granularity, subscription_type, instance_id
                 )
             """)
-            logger.info("Unique key updated")
+            logger.info("✓ Unique key updated")
         except Exception as e:
-            if 'Duplicate' in str(e):
-                logger.info("Unique key already updated")
+            if 'Duplicate' in str(e) or 'already exists' in str(e).lower():
+                logger.info("✓ Unique key already updated")
             else:
                 raise
 
         conn.commit()
-        logger.info("Migration completed successfully")
+        logger.info("✓ Migration completed successfully")
 
     except Exception as e:
         logger.error("Migration failed: %s", e)
-        conn.rollback()
+        try:
+            conn.rollback()
+        except:
+            pass
         raise
     finally:
         conn.close()
@@ -98,19 +96,19 @@ def migrate_sqlite():
         if 'instance_id' not in columns:
             logger.info("Adding instance_id column...")
             conn.execute("ALTER TABLE cost_records ADD COLUMN instance_id TEXT DEFAULT ''")
-            logger.info("instance_id column added")
+            logger.info("✓ instance_id column added")
         else:
-            logger.info("instance_id column already exists")
+            logger.info("✓ instance_id column already exists")
 
         if 'instance_name' not in columns:
             logger.info("Adding instance_name column...")
             conn.execute("ALTER TABLE cost_records ADD COLUMN instance_name TEXT DEFAULT ''")
-            logger.info("instance_name column added")
+            logger.info("✓ instance_name column added")
         else:
-            logger.info("instance_name column already exists")
+            logger.info("✓ instance_name column already exists")
 
         conn.commit()
-        logger.info("Migration completed successfully")
+        logger.info("✓ Migration completed successfully")
 
     except Exception as e:
         logger.error("Migration failed: %s", e)
