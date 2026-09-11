@@ -705,8 +705,13 @@ async def get_balance():
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     """Serve the dashboard HTML."""
+    from starlette.responses import Response
     html_path = Path(__file__).parent / "templates" / "dashboard.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    response = HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def create_app():
