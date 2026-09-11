@@ -416,6 +416,65 @@ async def get_daily_instances(
     return {"instances": instances, "total": len(instances)}
 
 
+@app.get("/api/daily/services", dependencies=[Depends(verify_token)])
+async def get_daily_services(
+    year: int = Query(None),
+    month: int = Query(None),
+    provider: str = Query(None),
+):
+    """Get daily cost breakdown by service."""
+    today = date.today()
+    y = year or today.year
+    m = month or today.month
+
+    start = f"{y}-{m:02d}-01"
+    if m == 12:
+        end = f"{y + 1}-01-01"
+    else:
+        end = f"{y}-{m + 1:02d}-01"
+
+    db = _get_db()
+    query = """SELECT record_date, provider, service_name, ROUND(SUM(cost),2) as total
+               FROM cost_records
+               WHERE record_date >= ? AND record_date < ? AND granularity='daily'"""
+    params = [start, end]
+
+    if provider:
+        query += " AND provider = ?"
+        params.append(provider)
+
+    query += " GROUP BY record_date, provider, service_name ORDER BY record_date, total DESC"
+
+    rows = db.execute(_adapt(query), params).fetchall()
+    db.close()
+
+    # Build structured result: {date: {service: {provider: cost}}}
+    daily_svc = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    all_services = set()
+    for r in rows:
+        dt, prov, svc, cost = r[0], r[1], r[2], r[3]
+        daily_svc[dt][svc][prov] = cost
+        all_services.add(svc)
+
+    result = []
+    for dt in sorted(daily_svc.keys()):
+        for svc in sorted(daily_svc[dt].keys(), key=lambda s: -sum(daily_svc[dt][s].values())):
+            providers_data = daily_svc[dt][svc]
+            total = round(sum(providers_data.values()), 2)
+            entry = {
+                "date": dt,
+                "service": svc,
+                "total": total,
+            }
+            entry.update(providers_data)
+            result.append(entry)
+
+    # Also return sorted unique service list for frontend
+    service_list = sorted(all_services)
+
+    return {"daily_services": result, "services": service_list}
+
+
 @app.get("/api/services", dependencies=[Depends(verify_token)])
 async def get_services(
     year: int = Query(None),

@@ -243,6 +243,30 @@ tr:hover td { background: rgba(99,102,241,0.05); }
 
     <div class="table-box" style="margin-top:16px;">
       <h3>
+        📦 服务级每日明细
+        <div class="table-controls">
+          <select id="dailySvcMonth" onchange="loadDailyServiceData()"></select>
+          <select id="dailySvcProvider" onchange="loadDailyServiceData()">
+            <option value="">全部厂商</option>
+            <option value="alibaba">阿里云</option>
+            <option value="tencent">腾讯云</option>
+          </select>
+          <select id="dailySvcFilter" onchange="filterDailyServices()">
+            <option value="">全部服务</option>
+          </select>
+        </div>
+      </h3>
+      <div style="max-height:500px; overflow-y:auto;">
+        <table id="dailySvcTable">
+          <thead><tr><th>日期</th><th>服务</th><th style="text-align:right">阿里云</th><th style="text-align:right">腾讯云</th><th style="text-align:right">合计</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="dailySvcSummary" style="margin-top:12px; padding:12px; background:#1a1d29; border-radius:8px; color:#8b8fa3; font-size:13px;"></div>
+    </div>
+
+    <div class="table-box" style="margin-top:16px;">
+      <h3>
         🔍 资源级明细
         <div class="table-controls">
           <select id="instanceMonth" onchange="loadInstanceData()"></select>
@@ -425,7 +449,7 @@ function switchTab(tab) {
   ['overview','daily','services','alerts','budgets'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === tab ? '' : 'none';
   });
-  if (tab === 'daily') { loadDailyData(); loadInstanceData(); }
+  if (tab === 'daily') { loadDailyData(); loadDailyServiceData(); loadInstanceData(); }
   if (tab === 'services') loadServiceData();
   if (tab === 'alerts') loadAlerts();
   if (tab === 'budgets') loadBudgets();
@@ -433,7 +457,7 @@ function switchTab(tab) {
 
 function populateMonthSelects() {
   const now = new Date();
-  const selects = ['dailyMonth','serviceMonth','instanceMonth'];
+  const selects = ['dailyMonth','serviceMonth','instanceMonth','dailySvcMonth'];
   selects.forEach(id => {
     const sel = document.getElementById(id);
     if (!sel) return;
@@ -953,6 +977,161 @@ async function deleteBudget(name) {
   } catch (e) {
     showToast('删除失败: ' + e.message, true);
   }
+}
+
+
+
+// ── Service-Level Daily Data ──
+let dailySvcData = [];
+
+async function loadDailyServiceData() {
+  const sel = document.getElementById('dailySvcMonth');
+  if (!sel) return;
+  const [y, m] = (sel.value || '').split('-').map(Number);
+  const provider = document.getElementById('dailySvcProvider').value;
+  if (!y) return;
+
+  try {
+    let url = API + '/api/daily/services?year=' + y + '&month=' + m;
+    if (provider) url += '&provider=' + provider;
+    const data = await fetchJSON(url);
+    dailySvcData = data.daily_services || [];
+
+    const filterSel = document.getElementById('dailySvcFilter');
+    if (filterSel) {
+      const currentVal = filterSel.value;
+      filterSel.innerHTML = '<option value="">全部服务</option>';
+      (data.services || []).forEach(function(svc) {
+        const opt = document.createElement('option');
+        opt.value = svc;
+        opt.textContent = svc;
+        filterSel.appendChild(opt);
+      });
+      filterSel.value = currentVal;
+    }
+    filterDailyServices();
+  } catch (e) {
+    showToast('加载服务明细失败: ' + e.message, true);
+  }
+}
+
+function filterDailyServices() {
+  const filterSvc = (document.getElementById('dailySvcFilter')?.value || '');
+  const filtered = filterSvc
+    ? dailySvcData.filter(function(d) { return d.service === filterSvc; })
+    : dailySvcData;
+  renderDailyServices(filtered);
+}
+
+function renderDailyServices(data) {
+  const tbody = document.querySelector('#dailySvcTable tbody');
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#8b8fa3;padding:24px;">暂无服务级日数据，请先同步账单</td></tr>';
+    document.getElementById('dailySvcSummary').innerHTML = '';
+    return;
+  }
+  tbody.innerHTML = data.map(function(d) {
+    return '<tr>'
+      + '<td>' + d.date + '</td>'
+      + '<td>' + d.service + '</td>'
+      + '<td style="text-align:right">\u00a5' + fmt(d.alibaba || 0) + '</td>'
+      + '<td style="text-align:right">\u00a5' + fmt(d.tencent || 0) + '</td>'
+      + '<td style="text-align:right"><strong>\u00a5' + fmt(d.total) + '</strong></td>'
+      + '</tr>';
+  }).join('');
+
+  const totalCost = data.reduce(function(s, d) { return s + (d.total || 0); }, 0);
+  const aliCost = data.reduce(function(s, d) { return s + (d.alibaba || 0); }, 0);
+  const txCost = data.reduce(function(s, d) { return s + (d.tencent || 0); }, 0);
+  const uniqueServices = new Set(data.map(function(d) { return d.service; })).size;
+  const uniqueDays = new Set(data.map(function(d) { return d.date; })).size;
+  document.getElementById('dailySvcSummary').innerHTML =
+    '共 <strong>' + data.length + '</strong> 条 | '
+    + '<strong>' + uniqueDays + '</strong> 天 | '
+    + '<strong>' + uniqueServices + '</strong> 个服务 | '
+    + '阿里云 <strong>\u00a5' + fmt(aliCost) + '</strong> | '
+    + '腾讯云 <strong>\u00a5' + fmt(txCost) + '</strong> | '
+    + '合计 <strong>\u00a5' + fmt(totalCost) + '</strong>';
+}
+
+// ── Instance-Level Data ──
+let instanceData = [];
+let allInstances = [];
+
+async function loadInstanceData() {
+  const sel = document.getElementById('instanceMonth');
+  if (!sel) return;
+  const [y, m] = (sel.value || '').split('-').map(Number);
+  const provider = document.getElementById('instanceProvider').value;
+  const service = document.getElementById('instanceService').value;
+  if (!y) return;
+
+  try {
+    let url = API + '/api/daily/instances?year=' + y + '&month=' + m;
+    if (provider) url += '&provider=' + provider;
+    if (service) url += '&service=' + encodeURIComponent(service);
+    url += '&limit=500';
+    const data = await fetchJSON(url);
+    allInstances = data.instances || [];
+    filterInstances();
+
+    const svcSel = document.getElementById('instanceService');
+    if (svcSel) {
+      const currentVal = svcSel.value;
+      const services = [...new Set(allInstances.map(function(i) { return i.service; }))].sort();
+      svcSel.innerHTML = '<option value="">全部服务</option>';
+      services.forEach(function(svc) {
+        const opt = document.createElement('option');
+        opt.value = svc;
+        opt.textContent = svc;
+        svcSel.appendChild(opt);
+      });
+      svcSel.value = currentVal;
+    }
+
+    const totalCost = allInstances.reduce(function(sum, inst) { return sum + (inst.cost || 0); }, 0);
+    const uniqueInstances = new Set(allInstances.filter(function(i) { return i.instance_id; }).map(function(i) { return i.instance_id; })).size;
+    document.getElementById('instanceSummary').innerHTML =
+      '共 <strong>' + allInstances.length + '</strong> 条记录 | '
+      + '<strong>' + uniqueInstances + '</strong> 个实例 | '
+      + '总成本 <strong>\u00a5' + fmt(totalCost) + '</strong>';
+  } catch (e) {
+    showToast('加载资源明细失败: ' + e.message, true);
+  }
+}
+
+function filterInstances() {
+  const search = (document.getElementById('instanceSearch')?.value || '').toLowerCase();
+  const filtered = allInstances.filter(function(inst) {
+    if (!search) return true;
+    return (inst.instance_id || '').toLowerCase().includes(search)
+      || (inst.instance_name || '').toLowerCase().includes(search)
+      || (inst.service || '').toLowerCase().includes(search);
+  });
+  renderInstances(filtered);
+}
+
+function renderInstances(instances) {
+  const providerNames = {'alibaba': '阿里云', 'tencent': '腾讯云'};
+  const tbody = document.querySelector('#instanceTable tbody');
+  if (!instances || instances.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b8fa3;padding:24px;">暂无资源级数据，请先同步账单数据</td></tr>';
+    return;
+  }
+  tbody.innerHTML = instances.map(function(inst) {
+    const providerName = providerNames[inst.provider] || inst.provider;
+    const instanceId = inst.instance_id || '-';
+    const instanceName = inst.instance_name || '-';
+    const isResourceId = inst.instance_id ? 'style="font-family:monospace;font-size:12px;"' : '';
+    return '<tr>'
+      + '<td>' + inst.date + '</td>'
+      + '<td><span class="provider-badge ' + inst.provider + '">' + providerName + '</span></td>'
+      + '<td>' + inst.service + '</td>'
+      + '<td ' + isResourceId + '>' + instanceId + '</td>'
+      + '<td>' + instanceName + '</td>'
+      + '<td style="text-align:right"><strong>\u00a5' + fmt(inst.cost) + '</strong></td>'
+      + '</tr>';
+  }).join('');
 }
 
 </script>
