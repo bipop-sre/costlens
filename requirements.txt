@@ -10,5 +10,5 @@ python-dotenv>=1.0.0
 rich>=13.0.0
 
 # WeChat Work Bot SDK
-wecom-aibot-sdk>=0.1.0
+wecom-aibot-sdk==0.1.7
 websockets>=12.0
