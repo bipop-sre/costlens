@@ -250,20 +250,19 @@ class WeChatWorkBotNotifier(Notifier):
 
     async def _ensure_connected(self):
         if self._client is None:
-            from wecom_aibot_sdk import WSClient, WSClientOptions
-            options = WSClientOptions(
-                bot_id=self.bot_id,
-                secret=self.secret,
+            from wecom_aibot_sdk import WSClient
+            self._client = WSClient(
+                self.bot_id,
+                self.secret,
                 max_reconnect_attempts=5,
                 reconnect_interval=2000,
             )
-            self._client = WSClient(options)
 
             async def handle_text(frame):
                 await self._on_message(frame)
 
             async def handle_enter(frame):
-                body = frame.body or {}
+                body = frame.get("body") or {}
                 from_info = body.get("from") or {}
                 userid = from_info.get("userid", "") if isinstance(from_info, dict) else ""
                 chatid = body.get("chatid") or userid
@@ -274,11 +273,11 @@ class WeChatWorkBotNotifier(Notifier):
             self._client.on("event.enter_chat", handle_enter)
 
         if not self._ws_connected:
-            await self._client.connect_async()
+            await self._client.connect()
             self._ws_connected = True
 
     async def _on_message(self, frame) -> None:
-        body = frame.body or {}
+        body = frame.get("body") or {}
         from_info = body.get("from") or {}
         userid = from_info.get("userid", "") if isinstance(from_info, dict) else ""
         chatid = body.get("chatid") or userid

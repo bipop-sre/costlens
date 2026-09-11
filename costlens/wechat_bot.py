@@ -54,7 +54,7 @@ class WeChatBotService:
 
     async def start(self) -> None:
         """Initialize agent and WebSocket client, then connect."""
-        from wecom_aibot_sdk import WSClient, WSClientOptions
+        from wecom_aibot_sdk import WSClient
 
         if self._running:
             return
@@ -68,18 +68,17 @@ class WeChatBotService:
 
         self._agent = CostLensAgent(self.settings)
 
-        options = WSClientOptions(
-            bot_id=bot_id,
-            secret=bot_secret,
+        self._ws_client = WSClient(
+            bot_id,
+            bot_secret,
             max_reconnect_attempts=-1,  # infinite reconnection
             reconnect_interval=3000,
         )
-        self._ws_client = WSClient(options)
 
         self._ws_client.on("message.text", self._handle_message)
         self._ws_client.on("event.enter_chat", self._handle_enter)
 
-        await self._ws_client.connect_async()
+        await self._ws_client.connect()
         self._running = True
         
         # Start billing scheduler (hourly sync)
@@ -117,7 +116,7 @@ class WeChatBotService:
 
     async def _handle_enter(self, frame) -> None:
         """Handle user entering a chat session."""
-        body = frame.body or {}
+        body = frame.get("body") or {}
         from_info = body.get("from") or {}
         userid = from_info.get("userid", "") if isinstance(from_info, dict) else ""
         chatid = body.get("chatid") or userid
@@ -127,7 +126,7 @@ class WeChatBotService:
 
     async def _handle_message(self, frame) -> None:
         """Route incoming message to command handler or AI agent."""
-        body = frame.body
+        body = frame.get("body")
         if not isinstance(body, dict):
             return
 
