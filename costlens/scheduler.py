@@ -132,12 +132,13 @@ class BillingScheduler:
             start_date = date(year, month, 1)
             end_date = today
 
-            all_items, account_id = connector._fetch_daily_items_for_month(
+            # Use instance-level API for resource details
+            all_items, account_id = connector._fetch_daily_instance_items_for_month(
                 client, month_str, start_date, end_date
             )
 
-            # Aggregate by unique key to prevent data loss
-            aggregated = defaultdict(lambda: {"cost": 0.0, "currency": "CNY", "tags": {}})
+            # Aggregate by date + service + instance
+            aggregated = defaultdict(lambda: {"cost": 0.0, "currency": "CNY", "tags": {}, "instance_name": ""})
             
             for item in all_items:
                 cost = float(item.pretax_amount or 0)
@@ -150,19 +151,22 @@ class BillingScheduler:
                 
                 service = item.product_name or item.product_code or "Unknown"
                 sub_type = getattr(item, 'subscription_type', '') or ''
-                key = (service, record_date, sub_type)
+                instance_id = getattr(item, 'instance_id', '') or ''
+                instance_name = getattr(item, 'instance_name', '') or ''
+                key = (service, record_date, sub_type, instance_id)
                 
                 aggregated[key]["cost"] += cost
                 aggregated[key]["currency"] = item.currency or "CNY"
+                aggregated[key]["instance_name"] = instance_name or aggregated[key]["instance_name"]
                 aggregated[key]["tags"] = {
                     "product_code": item.product_code or "",
                     "subscription_type": sub_type,
                     "biz_type": getattr(item, 'biz_type', '') or "",
                 }
             
-            # Create aggregated records
+            # Create records with instance-level data
             records = []
-            for (service, record_date, sub_type), data in aggregated.items():
+            for (service, record_date, sub_type, instance_id), data in aggregated.items():
                 records.append(CostRecord(
                     provider=provider_name,
                     account_id=account_id or connector._account_id or "default",
@@ -170,6 +174,8 @@ class BillingScheduler:
                     region="",
                     cost=data["cost"],
                     currency=data["currency"],
+                    instance_id=instance_id,
+                    instance_name=data["instance_name"],
                     date=record_date,
                     granularity=Granularity.DAILY,
                     tags=data["tags"],

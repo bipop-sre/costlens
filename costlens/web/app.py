@@ -358,6 +358,64 @@ async def get_daily_costs(
     return {"daily": result}
 
 
+@app.get("/api/daily/instances", dependencies=[Depends(verify_token)])
+async def get_daily_instances(
+    year: int = Query(None),
+    month: int = Query(None),
+    provider: str = Query(None),
+    service: str = Query(None),
+    limit: int = Query(200),
+):
+    """Get daily cost breakdown at instance/resource level."""
+    today = date.today()
+    y = year or today.year
+    m = month or today.month
+
+    start = f"{y}-{m:02d}-01"
+    if m == 12:
+        end = f"{y + 1}-01-01"
+    else:
+        end = f"{y}-{m + 1:02d}-01"
+
+    db = _get_db()
+    query = """SELECT record_date, provider, service_name, 
+                      COALESCE(instance_id, '') as instance_id,
+                      COALESCE(instance_name, '') as instance_name,
+                      ROUND(cost,2) as cost,
+                      currency
+               FROM cost_records 
+               WHERE record_date >= ? AND record_date < ? AND granularity='daily'"""
+    params = [start, end]
+
+    if provider:
+        query += " AND provider = ?"
+        params.append(provider)
+
+    if service:
+        query += " AND service_name = ?"
+        params.append(service)
+
+    query += " ORDER BY record_date, cost DESC LIMIT ?"
+    params.append(limit)
+
+    rows = db.execute(_adapt(query), params).fetchall()
+    db.close()
+
+    instances = []
+    for r in rows:
+        instances.append({
+            "date": r[0],
+            "provider": r[1],
+            "service": r[2],
+            "instance_id": r[3] or "",
+            "instance_name": r[4] or "",
+            "cost": r[5],
+            "currency": r[6],
+        })
+
+    return {"instances": instances, "total": len(instances)}
+
+
 @app.get("/api/services", dependencies=[Depends(verify_token)])
 async def get_services(
     year: int = Query(None),

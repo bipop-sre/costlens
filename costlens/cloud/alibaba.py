@@ -296,10 +296,87 @@ class AlibabaCloudCostConnector(CloudConnector):
             return {"provider": self.provider, "error": str(exc)}
 
 
+
+    def _fetch_instance_items(self, client, month: str, granularity_value: str, billing_date: str = None):
+        """Fetch instance-level bill items with pagination.
+        
+        Uses QueryInstanceBill API to get resource-level billing data.
+        For DAILY granularity, billing_date (YYYY-MM-DD) is required.
+        """
+        from alibabacloud_bssopenapi20171214.models import QueryInstanceBillRequest
+
+        all_items = []
+        page_num = 1
+        page_size = 300
+        account_id = ""
+        max_pages = 50
+
+        while page_num <= max_pages:
+            logger.info("阿里云: 查询实例级账单 %s (%s) 第 %d 页", month, granularity_value, page_num)
+            request_params = {
+                "billing_cycle": month,
+                "granularity": granularity_value,
+                "page_num": page_num,
+                "page_size": page_size,
+            }
+            if granularity_value == "DAILY" and billing_date:
+                request_params["billing_date"] = billing_date
+            
+            request = QueryInstanceBillRequest(**request_params)
+            response = client.query_instance_bill(request)
+            body = response.body
+
+            if not body.success:
+                logger.warning("阿里云实例级 API 返回失败: %s (月份: %s, 页: %d)", body.message, month, page_num)
+                break
+
+            if not body.data:
+                break
+
+            if not account_id and body.data.account_id:
+                account_id = body.data.account_id
+
+            if not body.data.items or not body.data.items.item:
+                break
+
+            items = body.data.items.item
+            all_items.extend(items)
+            total_count = body.data.total_count or 0
+            logger.info("阿里云实例级: %s 第 %d 页获取 %d 条, 累计 %d/%d", month, page_num, len(items), len(all_items), total_count)
+
+            if len(all_items) >= total_count:
+                break
+
+            page_num += 1
+
+        return all_items, account_id
+
+    def _fetch_daily_instance_items_for_month(self, client, month: str, start_date, end_date):
+        """Fetch daily instance-level data for each day in the specified date range."""
+        from datetime import timedelta
+        
+        all_items = []
+        account_id = ""
+        current = start_date
+        
+        while current <= end_date:
+            billing_date = current.strftime("%Y-%m-%d")
+            logger.info("阿里云: 查询日粒度实例级数据 %s", billing_date)
+            
+            items, aid = self._fetch_instance_items(client, month, "DAILY", billing_date)
+            all_items.extend(items)
+            
+            if aid and not account_id:
+                account_id = aid
+            
+            current += timedelta(days=1)
+        
+        return all_items, account_id
+
     async def get_daily_cost_data(
         self, year: int, month: int, start_day: int = 1, end_day: int = 31
     ) -> list[CostRecord]:
-        """获取阿里云日粒度账单数据
+        """获取阿里云日粒度账单数据（实例级）
         
         Args:
             year: 年份
@@ -308,7 +385,7 @@ class AlibabaCloudCostConnector(CloudConnector):
             end_day: 结束日期
             
         Returns:
-            CostRecord 列表，每条记录代表一天某服务的成本
+            CostRecord 列表，每条记录代表一天某实例的成本
         """
         from datetime import date, timedelta
         from collections import defaultdict
@@ -319,20 +396,29 @@ class AlibabaCloudCostConnector(CloudConnector):
         start_date = date(year, month, start_day)
         end_date = date(year, month, min(end_day, 31))
         
-        all_items, account_id = self._fetch_daily_items_for_month(
+        # Use instance-level API for resource details
+        all_items, account_id = self._fetch_daily_instance_items_for_month(
             client, month_str, start_date, end_date
         )
         
-        # Aggregate by date + service to avoid duplicates
-        daily_service: dict[tuple, float] = defaultdict(float)
+        # Aggregate by date + service + instance to avoid duplicates
+        daily_instance: dict[tuple, float] = defaultdict(float)
+        instance_names: dict[str, str] = {}
+        
         for item in all_items:
             cost = float(item.pretax_amount or 0)
             if item.billing_date:
-                key = (item.billing_date, item.product_name or item.product_code or "Unknown")
-                daily_service[key] += cost
+                instance_id = item.instance_id or ""
+                service_name = item.product_name or item.product_code or "Unknown"
+                key = (item.billing_date, service_name, instance_id)
+                daily_instance[key] += cost
+                
+                # Store instance name mapping
+                if instance_id and hasattr(item, 'instance_name') and item.instance_name:
+                    instance_names[instance_id] = item.instance_name
         
         records = []
-        for (billing_date, service_name), cost in daily_service.items():
+        for (billing_date, service_name, instance_id), cost in daily_instance.items():
             if cost > 0:
                 try:
                     record_date = date.fromisoformat(billing_date)
@@ -345,11 +431,13 @@ class AlibabaCloudCostConnector(CloudConnector):
                     region="",
                     cost=cost,
                     currency="CNY",
+                    instance_id=instance_id,
+                    instance_name=instance_names.get(instance_id, ""),
                     date=record_date,
                     granularity=Granularity.DAILY,
                 ))
         
-        logger.info("阿里云日粒度: %d-%02d 共 %d 条记录", year, month, len(records))
+        logger.info("阿里云日粒度(实例级): %d-%02d 共 %d 条记录", year, month, len(records))
         return records
 
     async def close(self) -> None:
