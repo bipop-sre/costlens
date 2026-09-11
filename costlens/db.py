@@ -28,10 +28,8 @@ CREATE TABLE IF NOT EXISTS cost_records (
     record_date DATE NOT NULL,
     granularity VARCHAR(16) DEFAULT 'daily',
     subscription_type VARCHAR(128) DEFAULT '',
-    instance_id VARCHAR(256) DEFAULT '',
-    instance_name VARCHAR(256) DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_cost_record (provider, account_id, service_name, region, record_date, granularity, subscription_type, instance_id)
+    UNIQUE KEY uk_cost_record (provider, account_id, service_name, region, record_date, granularity, subscription_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS alerts (

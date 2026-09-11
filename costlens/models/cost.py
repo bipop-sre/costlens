@@ -25,8 +25,6 @@ class CostRecord(BaseModel):
     currency: str = "USD"
     usage_amount: float = 0.0
     usage_unit: str = ""
-    instance_id: str = ""  # 资源实例ID
-    instance_name: str = ""  # 资源实例名称
     tags: dict[str, str] = Field(default_factory=dict)
     date: date
     granularity: Granularity = Granularity.DAILY

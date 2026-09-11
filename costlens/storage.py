@@ -173,22 +173,19 @@ class Storage:
                     sql = self._backend.adapt_sql(
                         """INSERT INTO cost_records
                            (provider, account_id, service_name, region, cost, currency,
-                            usage_amount, usage_unit, tags, record_date, granularity, subscription_type,
-                            instance_id, instance_name)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                           ON CONFLICT(provider, account_id, service_name, region, record_date, granularity, subscription_type, instance_id)
+                            usage_amount, usage_unit, tags, record_date, granularity, subscription_type)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(provider, account_id, service_name, region, record_date, granularity, subscription_type)
                            DO UPDATE SET cost=excluded.cost, usage_amount=excluded.usage_amount,
-                                         tags=excluded.tags, instance_name=excluded.instance_name"""
+                                         tags=excluded.tags"""
                     )
-                    instance_id = getattr(r, 'instance_id', '') or ''
-                    instance_name = getattr(r, 'instance_name', '') or ''
                     conn.execute(
                         sql,
                         (
                             r.provider, r.account_id, r.service_name, r.region,
                             r.cost, r.currency, r.usage_amount, r.usage_unit,
                             json.dumps(r.tags), r.date.isoformat(), r.granularity.value,
-                            subscription_type, instance_id, instance_name,
+                            subscription_type,
                         ),
                     )
                     count += 1

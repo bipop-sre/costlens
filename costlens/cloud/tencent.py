@@ -301,10 +301,10 @@ class TencentCloudCostConnector(CloudConnector):
         
         logger.info("腾讯云 %s 明细: 共获取 %d 条原始记录", month_str, len(all_items))
         
-        # Aggregate by BillDay + service + instance (resource-level)
+        # Aggregate by BillDay + service
         start_date = date(year, month, start_day)
         end_date = date(year, month, min(end_day, 31))
-        daily_instance: dict[tuple, float] = defaultdict(float)
+        daily_service: dict[tuple, float] = defaultdict(float)
         
         for item in all_items:
             bill_day = (item.BillDay or "")[:10]
@@ -316,20 +316,13 @@ class TencentCloudCostConnector(CloudConnector):
                 continue
             if d < start_date or d > end_date:
                 continue
-            
-            # Extract instance ID and name
-            instance_id = getattr(item, 'ResourceId', '') or ''
-            instance_name = getattr(item, 'ResourceName', '') or ''
-            
             for comp in (item.ComponentSet or []):
                 cost = float(comp.RealCost or 0)
                 if cost > 0:
-                    service_name = item.BusinessCodeName or "Unknown"
-                    # Aggregate by day + service + instance
-                    daily_instance[(bill_day, service_name, instance_id)] += cost
+                    daily_service[(bill_day, item.BusinessCodeName or "Unknown")] += cost
         
         records = []
-        for (bill_day, service_name, instance_id), cost in daily_instance.items():
+        for (bill_day, service_name), cost in daily_service.items():
             records.append(CostRecord(
                 provider=self.provider,
                 account_id=self._account_id or "default",
@@ -337,13 +330,11 @@ class TencentCloudCostConnector(CloudConnector):
                 region="",
                 cost=cost,
                 currency="CNY",
-                instance_id=instance_id,
-                instance_name=instance_name if instance_id else "",
                 date=date.fromisoformat(bill_day),
                 granularity=Granularity.DAILY,
             ))
         
-        logger.info("腾讯云日粒度(实例级): %s 聚合后 %d 条记录", month_str, len(records))
+        logger.info("腾讯云日粒度: %s 聚合后 %d 条记录", month_str, len(records))
         return records
         
         return records
