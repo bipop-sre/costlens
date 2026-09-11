@@ -19,7 +19,40 @@ from costlens.db import get_backend
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CostLens Dashboard", version="1.0.0")
+from contextlib import asynccontextmanager
+
+_bot_service = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _bot_service
+    from costlens.config import get_settings
+    settings = get_settings()
+
+    # Start WeChat bot if configured
+    if settings.wechat_work_bot_id and settings.wechat_work_bot_secret:
+        try:
+            from costlens.wechat_bot import WeChatBotService
+            _bot_service = WeChatBotService(settings)
+            await _bot_service.start()
+            logger.info("WeChat Bot started alongside web server")
+        except Exception as exc:
+            logger.error("Failed to start WeChat Bot: %s", exc, exc_info=True)
+    else:
+        logger.info("WeChat Bot not configured (missing BOT_ID/BOT_SECRET)")
+
+    yield
+
+    if _bot_service is not None:
+        try:
+            await _bot_service.stop()
+            logger.info("WeChat Bot stopped")
+        except Exception as exc:
+            logger.warning("Error stopping bot: %s", exc)
+
+
+app = FastAPI(title="CostLens Dashboard", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

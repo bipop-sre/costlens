@@ -43,6 +43,16 @@ services:
       - DATABASE_URL=sqlite:///data/costlens.db
       - LOG_LEVEL=INFO
       - WECHAT_WORK_WEBHOOK=${WECHAT_WORK_WEBHOOK:-}
+      - WECHAT_WORK_BOT_ID=${WECHAT_WORK_BOT_ID:-}
+      - WECHAT_WORK_BOT_SECRET=${WECHAT_WORK_BOT_SECRET:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - ENABLED_PROVIDERS=${ENABLED_PROVIDERS:-alibaba,tencent}
+      - ALIBABA_CLOUD_ACCESS_KEY_ID=${ALIBABA_CLOUD_ACCESS_KEY_ID:-}
+      - ALIBABA_CLOUD_ACCESS_KEY_SECRET=${ALIBABA_CLOUD_ACCESS_KEY_SECRET:-}
+      - TENCENT_CLOUD_SECRET_ID=${TENCENT_CLOUD_SECRET_ID:-}
+      - TENCENT_CLOUD_SECRET_KEY=${TENCENT_CLOUD_SECRET_KEY:-}
     volumes:
       - costlens-data:/app/data
       - ./costlens:/app/costlens

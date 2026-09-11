@@ -9,8 +9,7 @@ import os
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from costlens.bot.wechat_work import WeChatWorkBot
-from costlens.config import get_settings
+from costlens.wechat_bot import run_wechat_bot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,13 +18,8 @@ logging.basicConfig(
 
 async def main():
     """Run the WeChat Work bot."""
-    settings = get_settings()
-    bot = WeChatWorkBot(settings)
-    
     logging.info("Starting CostLens WeChat Work Bot...")
-    
-    # Start bot (runs indefinitely)
-    await bot.start()
+    await run_wechat_bot()
 
 if __name__ == "__main__":
     try:
