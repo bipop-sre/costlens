@@ -1,5 +1,5 @@
 # CostLens Dockerfile
-FROM harbor.ymt.io/inf/python:3.11 
+FROM harbor.ymt.io/inf/python:3.11-slim
 
 # Set working directory
 WORKDIR /app
@@ -27,5 +27,9 @@ ENV PYTHONUNBUFFERED=1
 # Expose port for web dashboard
 EXPOSE 8080
 
-# Default command - run web dashboard
+# Health check - verifies web server is responsive
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()" || exit 1
+
+# Start web server (bot and scheduler start automatically via lifespan)
 CMD ["python", "run_web.py"]
