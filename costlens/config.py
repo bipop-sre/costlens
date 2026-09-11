@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     agent_cost_cache_ttl: int = 3600
 
     # Enabled cloud providers (comma-separated in env: "aws,azure,gcp")
-    enabled_providers: str = "aws"
+    enabled_providers: str = "alibaba,tencent"
 
     def get_enabled_providers(self) -> list[CloudProvider]:
         providers = []

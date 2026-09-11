@@ -173,7 +173,7 @@ async def check_budgets():
                     a.get("alert_type") == "budget_threshold" and
                     budget.name in a.get("title", "") and
                     f"{threshold:.0f}%" in a.get("title", "") and
-                    a.get("timestamp", "").startswith(f"{today.year}-{today.month:02d}")
+                    str(a.get("timestamp", "")).startswith(f"{today.year}-{today.month:02d}")
                     for a in existing_alerts
                 )
 
