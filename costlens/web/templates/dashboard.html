@@ -302,12 +302,15 @@ tr:hover td { background: rgba(99,102,241,0.05); }
 
 <script>
 
+// ── API Base Path ──
+const API = '/costlens';
+
 // ── Authentication ──
 let authToken = localStorage.getItem('finops_auth_token') || '';
 
 async function checkAuth() {
   try {
-    const res = await fetch('/api/auth/check', {
+    const res = await fetch(API + '/api/auth/check', {
       headers: authToken ? {'Authorization': 'Bearer ' + authToken} : {}
     });
     const data = await res.json();
@@ -326,7 +329,7 @@ async function checkAuth() {
 async function submitAuth() {
   const token = document.getElementById('authTokenInput').value;
   try {
-    const res = await fetch('/api/auth/check', {
+    const res = await fetch(API + '/api/auth/check', {
       headers: {'Authorization': 'Bearer ' + token}
     });
     const data = await res.json();
@@ -347,8 +350,6 @@ async function submitAuth() {
 
 
 
-
-const API = '';
 
 async function fetchJSON(url) {
   const res = await fetch(API + url, {
