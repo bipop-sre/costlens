@@ -10,9 +10,12 @@ ENV PIP_PROGRESS_BAR=off PIP_NO_INPUT=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip (old bundled rich has threading issues) then install deps
-RUN python -m pip install --upgrade pip setuptools wheel && \
-    python -m pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install build tools first
+RUN python -m pip install --upgrade pip setuptools wheel build && \
+    # Install build dependencies for alibabacloud-tea (source distribution)
+    python -m pip install --no-cache-dir hatchling hatch-vcs && \
+    # Install main dependencies without build isolation to avoid permission issues
+    python -m pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 # Copy application code
 COPY . .
