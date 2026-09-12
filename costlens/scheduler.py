@@ -60,6 +60,12 @@ class BillingScheduler:
                 total_cost += cost
                 logger.info("%s: monthly %d records, %.2f CNY", provider.value, len(records), cost)
 
+                # ── Remove monthly records for current month (will be replaced by daily) ──
+                current_month_start = date(end.year, end.month, 1)
+                deleted = self._storage._delete_monthly_records(provider.value, current_month_start, end)
+                if deleted:
+                    logger.info("%s: removed %d monthly records for current month", provider.value, deleted)
+
                 # ── Daily granularity for current month ──
                 try:
                     daily_records = await self._fetch_daily_data(connector, provider.value, end)
