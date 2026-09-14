@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class AnomalyDetector:
     """Detect cost anomalies using statistical methods."""
 
-    def __init__(self, threshold_sigma: float = 2.0, spike_threshold_pct: float = 30.0) -> None:
+    def __init__(self, threshold_sigma: float = 3.0, spike_threshold_pct: float = 50.0) -> None:
         self.threshold_sigma = threshold_sigma
         self.spike_threshold_pct = spike_threshold_pct
 
@@ -34,7 +34,7 @@ class AnomalyDetector:
         alerts = []
         for service, daily in service_daily.items():
             sorted_dates = sorted(daily.keys())
-            if len(sorted_dates) < 7:
+            if len(sorted_dates) < 14:
                 continue
 
             values = np.array([daily[d] for d in sorted_dates])
@@ -70,7 +70,7 @@ class AnomalyDetector:
                     if change_pct >= self.spike_threshold_pct:
                         alerts.append(Alert(
                             alert_type=AlertType.COST_SPIKE,
-                            severity=AlertSeverity.CRITICAL if change_pct >= 50 else AlertSeverity.WARNING,
+                            severity=AlertSeverity.CRITICAL if change_pct >= 100 else AlertSeverity.WARNING,
                             title=f"{service} 成本骤增",
                             message=(
                                 f"{service} 日环比增长 {change_pct:.1f}%，"

@@ -34,10 +34,17 @@ class ProactiveInspector:
         self._last_inspection: Optional[datetime] = None
         self._last_daily_report: Optional[date] = None
         self._last_weekly_report: Optional[date] = None
+        self._notified_today: set[tuple[str, str, str]] = set()
+        self._notified_date: Optional[date] = None
 
     async def inspect_after_sync(self, broadcast_fn) -> dict:
         """Run inspection after billing sync completes."""
         now = datetime.now()
+        today = date.today()
+        # Reset daily dedup set if new day
+        if self._notified_date != today:
+            self._notified_today.clear()
+            self._notified_date = today
         results = {
             "alerts_created": 0,
             "alerts_notified": 0,
@@ -97,7 +104,7 @@ class ProactiveInspector:
         from costlens.storage import get_storage
         
         storage = get_storage()
-        detector = AnomalyDetector(threshold_sigma=2.5, spike_threshold_pct=30.0)
+        detector = AnomalyDetector(threshold_sigma=3.0, spike_threshold_pct=50.0)
         
         end_date = date.today()
         start_date = end_date - timedelta(days=30)
@@ -114,6 +121,11 @@ class ProactiveInspector:
                 today_str = end_date.isoformat()
                 for alert in provider_alerts:
                     if today_str in alert.message:
+                        # Dedup: skip if we already notified this provider+service today
+                        dedup_key = (alert.provider, alert.title, today_str)
+                        if dedup_key in self._notified_today:
+                            continue
+                        self._notified_today.add(dedup_key)
                         alerts.append(alert)
                         storage.save_alert(alert)
         
