@@ -54,6 +54,7 @@ def track_openai_response(
             usage = response.get("usage")
 
         if usage is None:
+            logger.info("Bailian tracking skipped: no usage data in response (model=%s)", model_name)
             return {"status": "skipped", "reason": "no usage data"}
 
         # Convert to dict if it's an object
@@ -86,8 +87,14 @@ def track_openai_response(
         )
 
         if record is None:
+            logger.info("Bailian tracking skipped: no token data (model=%s, usage=%s)", model_name, usage_dict)
             return {"status": "skipped", "reason": "no token data"}
 
+        logger.info(
+            "Bailian usage tracked: model=%s input=%d output=%d total=%d cost=¥%.4f",
+            record.model_name, record.input_tokens, record.output_tokens,
+            record.total_tokens, record.estimated_cost,
+        )
         return {
             "status": "ok",
             "model": record.model_name,
@@ -97,7 +104,7 @@ def track_openai_response(
             "estimated_cost": record.estimated_cost,
         }
     except Exception as exc:
-        logger.warning("Failed to track Bailian usage: %s", exc)
+        logger.error("Failed to track Bailian usage: %s", exc, exc_info=True)
         return {"status": "error", "error": str(exc)}
 
 

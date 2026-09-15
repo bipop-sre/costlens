@@ -272,3 +272,93 @@ async def get_usage_trend(months: int = Query(6, ge=1, le=12)):
         })
 
     return {"trend": trend}
+
+
+# ── Diagnostic ──
+
+
+@router.get("/diagnose", dependencies=[Depends(verify_token)])
+async def diagnose():
+    """Diagnostic endpoint to verify the entire Bailian tracking pipeline."""
+    import traceback
+    results = {"steps": []}
+
+    # Step 1: Check tracker initialization
+    try:
+        tracker = get_bailian_tracker()
+        results["steps"].append({"step": "tracker_init", "status": "ok"})
+    except Exception as exc:
+        results["steps"].append({"step": "tracker_init", "status": "error", "error": str(exc), "traceback": traceback.format_exc()})
+        results["overall"] = "failed"
+        return results
+
+    # Step 2: Check API keys
+    try:
+        keys = tracker.list_api_keys(active_only=False)
+        results["steps"].append({"step": "list_keys", "status": "ok", "count": len(keys), "keys": [k.key_alias for k in keys]})
+    except Exception as exc:
+        results["steps"].append({"step": "list_keys", "status": "error", "error": str(exc)})
+
+    # Step 3: Write test record
+    try:
+        from datetime import date as dt_date
+        test_date = dt_date(2020, 1, 1)
+        record = tracker.record_usage(
+            key_alias="__diag__",
+            model_name="test-model",
+            input_tokens=100,
+            output_tokens=50,
+            usage_date=test_date,
+            request_id="diag-test-001",
+        )
+        results["steps"].append({
+            "step": "write_test",
+            "status": "ok",
+            "total_tokens": record.total_tokens,
+            "estimated_cost": record.estimated_cost,
+        })
+    except Exception as exc:
+        results["steps"].append({"step": "write_test", "status": "error", "error": str(exc), "traceback": traceback.format_exc()})
+        results["overall"] = "failed"
+        return results
+
+    # Step 4: Read back test record
+    try:
+        from costlens.db import get_backend
+        backend = get_backend()
+        sql = backend.adapt_sql(
+            "SELECT COUNT(*) as cnt FROM bailian_usage_records WHERE key_alias = ?"
+        )
+        with backend.connect() as conn:
+            row = conn.execute(sql, ("__diag__",)).fetchone()
+            count = row["cnt"] if row else 0
+        results["steps"].append({"step": "read_test", "status": "ok", "diag_records": count})
+    except Exception as exc:
+        results["steps"].append({"step": "read_test", "status": "error", "error": str(exc), "traceback": traceback.format_exc()})
+
+    # Step 5: Clean up test record
+    try:
+        from costlens.db import get_backend
+        backend = get_backend()
+        sql = backend.adapt_sql("DELETE FROM bailian_usage_records WHERE key_alias = ?")
+        with backend.connect() as conn:
+            conn.execute(sql, ("__diag__",))
+            conn.commit()
+        results["steps"].append({"step": "cleanup", "status": "ok"})
+    except Exception as exc:
+        results["steps"].append({"step": "cleanup", "status": "error", "error": str(exc)})
+
+    # Step 6: Check total usage records
+    try:
+        from costlens.db import get_backend
+        backend = get_backend()
+        sql = "SELECT COUNT(*) as cnt FROM bailian_usage_records"
+        with backend.connect() as conn:
+            row = conn.execute(sql).fetchone()
+            total = row["cnt"] if row else 0
+        results["steps"].append({"step": "total_records", "status": "ok", "count": total})
+    except Exception as exc:
+        results["steps"].append({"step": "total_records", "status": "error", "error": str(exc)})
+
+    results["overall"] = "ok"
+    return results
