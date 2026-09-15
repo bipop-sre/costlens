@@ -12,6 +12,7 @@ from costlens.agent.tools.registry import ToolRegistry
 from costlens.analysis.analyzer import CostAnalyzer
 from costlens.config import Settings, get_settings
 from costlens.models.budget import Budget
+from costlens.bailian import track_openai_response
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ class CostLensAgent:
                 temperature=0.3,
             )
 
+            track_openai_response("default", response, self.settings.openai_model)
             choice = response.choices[0]
             assistant_message = choice.message
 
@@ -175,6 +177,7 @@ class CostLensAgent:
             messages=messages,
             temperature=0.3,
         )
+        track_openai_response("default", response, self.settings.openai_model)
         return response.choices[0].message.content or ""
 
     async def stream_chat(
@@ -201,6 +204,7 @@ class CostLensAgent:
                 temperature=0.3,
             )
 
+            track_openai_response("default", response, self.settings.openai_model)
             choice = response.choices[0]
             assistant_message = choice.message
 
@@ -210,10 +214,15 @@ class CostLensAgent:
                     messages=messages,
                     temperature=0.3,
                     stream=True,
+                    stream_options={"include_usage": True},
                 )
+                last_chunk = None
                 async for chunk in stream:
                     if chunk.choices[0].delta.content:
                         yield chunk.choices[0].delta.content
+                    last_chunk = chunk
+                if last_chunk and hasattr(last_chunk, "usage") and last_chunk.usage:
+                    track_openai_response("default", last_chunk, self.settings.openai_model)
                 return
 
             messages.append(assistant_message.model_dump())
@@ -239,10 +248,15 @@ class CostLensAgent:
             messages=messages,
             temperature=0.3,
             stream=True,
+            stream_options={"include_usage": True},
         )
+        last_chunk = None
         async for chunk in stream:
             if chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
+            last_chunk = chunk
+        if last_chunk and hasattr(last_chunk, "usage") and last_chunk.usage:
+            track_openai_response("default", last_chunk, self.settings.openai_model)
 
     async def close(self) -> None:
         await self.analyzer.close()
