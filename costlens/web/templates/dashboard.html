@@ -174,6 +174,7 @@ tr:hover td { background: rgba(99,102,241,0.05); }
     <div class="tab" onclick="switchTab('services')">🔧 服务明细</div>
     <div class="tab" onclick="switchTab('alerts')">🔔 告警</div>
     <div class="tab" onclick="switchTab('budgets')">💰 预算</div>
+    <div class="tab" onclick="switchTab('bailian')">🤖 百炼</div>
   </div>
 
   <!-- Overview Tab -->
@@ -293,6 +294,95 @@ tr:hover td { background: rgba(99,102,241,0.05); }
     </div>
   </div>
 
+  <!-- Bailian Tab -->
+  <div id="tab-bailian" style="display:none">
+    <div class="cards-row" id="bailianStatsCards" style="grid-template-columns: repeat(4, 1fr);">
+      <div class="stat-card"><div class="label">总 Token 消耗</div><div class="value" id="blTotalTokens">-</div><div class="sub neutral" id="blPeriod">-</div></div>
+      <div class="stat-card"><div class="label">输入 Token</div><div class="value" id="blInputTokens">-</div><div class="sub neutral" id="blInputPct">-</div></div>
+      <div class="stat-card"><div class="label">输出 Token</div><div class="value" id="blOutputTokens">-</div><div class="sub neutral" id="blOutputPct">-</div></div>
+      <div class="stat-card"><div class="label">估算费用</div><div class="value" id="blCost">-</div><div class="sub neutral" id="blCalls">-</div></div>
+    </div>
+
+    <div class="chart-row">
+      <div class="chart-box">
+        <h3>📈 百炼 Token 用量趋势</h3>
+        <div class="chart-container" id="blTrendChart"></div>
+      </div>
+      <div class="chart-box">
+        <h3>🏢 各 Key 用量占比</h3>
+        <div class="chart-container" id="blKeyPieChart"></div>
+      </div>
+    </div>
+
+    <div class="chart-box full-chart" style="margin-bottom:24px">
+      <h3>🔝 Top 模型 Token 消耗</h3>
+      <div class="chart-container tall" id="blModelChart"></div>
+    </div>
+
+    <div class="table-box">
+      <h3>
+        🔑 各 Key 用量明细
+        <div class="table-controls">
+          <select id="blDays" onchange="loadBailianSummary()">
+            <option value="7">最近 7 天</option>
+            <option value="30" selected>最近 30 天</option>
+            <option value="90">最近 90 天</option>
+          </select>
+        </div>
+      </h3>
+      <table id="blKeyTable">
+        <thead><tr>
+          <th>Key 别名</th>
+          <th>输入 Token</th>
+          <th>输出 Token</th>
+          <th>总 Token</th>
+          <th>调用次数</th>
+          <th>估算费用</th>
+          <th>输出占比</th>
+          <th>日均 Token</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="table-box">
+      <h3>
+        📅 每日 Token 用量
+        <div class="table-controls">
+          <select id="blDailyMonth" onchange="loadBailianDaily()"></select>
+          <select id="blDailyKey" onchange="loadBailianDaily()">
+            <option value="">全部 Key</option>
+          </select>
+        </div>
+      </h3>
+      <div class="chart-container" id="blDailyChart"></div>
+      <div style="margin-top:16px; max-height:400px; overflow-y:auto;">
+        <table id="blDailyTable">
+          <thead><tr><th>日期</th><th>输入 Token</th><th>输出 Token</th><th>总 Token</th><th>调用次数</th><th>费用</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="table-box">
+      <h3>
+        🧩 模型用量明细
+      </h3>
+      <table id="blModelTable">
+        <thead><tr>
+          <th>模型</th>
+          <th>输入 Token</th>
+          <th>输出 Token</th>
+          <th>总 Token</th>
+          <th>调用次数</th>
+          <th>费用</th>
+          <th>占比</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
   <div style="text-align:center; padding:24px 0; color:var(--text-dim); font-size:13px;">
     <span id="syncInfo">-</span>
   </div>
@@ -378,16 +468,17 @@ function showToast(msg, isError=false) {
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((t,i) => {
-    const tabs = ['overview','daily','services','alerts','budgets'];
+    const tabs = ['overview','daily','services','alerts','budgets','bailian'];
     t.classList.toggle('active', tabs[i] === tab);
   });
-  ['overview','daily','services','alerts','budgets'].forEach(t => {
+  ['overview','daily','services','alerts','budgets','bailian'].forEach(t => {
     document.getElementById('tab-'+t).style.display = t === tab ? '' : 'none';
   });
   if (tab === 'daily') loadDailyData();
   if (tab === 'services') loadServiceData();
   if (tab === 'alerts') loadAlerts();
   if (tab === 'budgets') loadBudgets();
+  if (tab === 'bailian') loadBailianAll();
   }
 
 function populateMonthSelects() {
@@ -914,6 +1005,278 @@ async function deleteBudget(name) {
   }
 }
 
+
+// ── Bailian Token Usage ──
+
+let bailianData = null;
+
+function fmtTokens(n) {
+  if (n == null) return '-';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
+
+async function loadBailianAll() {
+  populateBailianMonthSelect();
+  await Promise.all([loadBailianSummary(), loadBailianTrend()]);
+}
+
+function populateBailianMonthSelect() {
+  const sel = document.getElementById('blDailyMonth');
+  if (!sel) return;
+  const now = new Date();
+  sel.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const opt = document.createElement('option');
+    opt.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    opt.textContent = `${d.getFullYear()}年${d.getMonth()+1}月`;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadBailianSummary() {
+  const days = document.getElementById('blDays')?.value || 30;
+  try {
+    const data = await fetchJSON(`/api/bailian/usage/summary?days=${days}`);
+    bailianData = data;
+    renderBailianSummary(data);
+  } catch (e) {
+    showToast('加载百炼用量失败: ' + e.message, true);
+  }
+}
+
+async function loadBailianTrend() {
+  try {
+    const data = await fetchJSON('/api/bailian/usage/trend?months=6');
+    renderBailianTrend(data);
+  } catch (e) {
+    console.error('Bailian trend load failed:', e);
+  }
+}
+
+async function loadBailianDaily() {
+  const sel = document.getElementById('blDailyMonth');
+  if (!sel) return;
+  const [y, m] = (sel.value || '').split('-').map(Number);
+  const keyAlias = document.getElementById('blDailyKey')?.value || '';
+  if (!y) return;
+  try {
+    const data = await fetchJSON(`/api/bailian/usage/daily?year=${y}&month=${m}&key_alias=${encodeURIComponent(keyAlias)}`);
+    renderBailianDaily(data);
+  } catch (e) {
+    showToast('加载百炼每日数据失败: ' + e.message, true);
+  }
+}
+
+function renderBailianSummary(data) {
+  const totals = data.totals || {};
+  const totalTokens = totals.total_tokens || 0;
+  const inputTokens = totals.input_tokens || 0;
+  const outputTokens = totals.output_tokens || 0;
+  const cost = totals.estimated_cost || 0;
+  const calls = totals.calls || 0;
+
+  document.getElementById('blTotalTokens').textContent = fmtTokens(totalTokens);
+  document.getElementById('blPeriod').textContent = `${data.period?.start} ~ ${data.period?.end}`;
+  document.getElementById('blInputTokens').textContent = fmtTokens(inputTokens);
+  document.getElementById('blInputPct').textContent = totalTokens > 0 ? `占比 ${((inputTokens/totalTokens)*100).toFixed(1)}%` : '-';
+  document.getElementById('blOutputTokens').textContent = fmtTokens(outputTokens);
+  document.getElementById('blOutputPct').textContent = totalTokens > 0 ? `占比 ${((outputTokens/totalTokens)*100).toFixed(1)}%` : '-';
+  document.getElementById('blCost').textContent = `¥${cost.toFixed(4)}`;
+  document.getElementById('blCalls').textContent = `${calls.toLocaleString()} 次调用`;
+
+  // Key table
+  const byKey = data.by_key || [];
+  const tbody = document.querySelector('#blKeyTable tbody');
+  if (byKey.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:40px; color:#666">暂无百炼用量数据</td></tr>';
+  } else {
+    tbody.innerHTML = byKey.map(k => `
+      <tr>
+        <td><strong>${k.key_alias}</strong></td>
+        <td>${fmtTokens(k.input_tokens)}</td>
+        <td>${fmtTokens(k.output_tokens)}</td>
+        <td>${fmtTokens(k.total_tokens)}</td>
+        <td>${(k.calls || 0).toLocaleString()}</td>
+        <td>¥${(k.estimated_cost || 0).toFixed(4)}</td>
+        <td>${(k.output_ratio || 0).toFixed(1)}%</td>
+        <td>${fmtTokens(k.daily_avg_tokens)}</td>
+      </tr>
+    `).join('');
+  }
+
+  // Update daily key selector
+  const keySelect = document.getElementById('blDailyKey');
+  if (keySelect) {
+    const currentVal = keySelect.value;
+    keySelect.innerHTML = '<option value="">全部 Key</option>';
+    byKey.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k.key_alias;
+      opt.textContent = k.key_alias;
+      keySelect.appendChild(opt);
+    });
+    if (currentVal) keySelect.value = currentVal;
+  }
+
+  // Model table
+  const topModels = data.top_models || [];
+  const modelTbody = document.querySelector('#blModelTable tbody');
+  if (topModels.length === 0) {
+    modelTbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:40px; color:#666">暂无模型数据</td></tr>';
+  } else {
+    const maxTokens = Math.max(...topModels.map(m => m.total_tokens || 0));
+    modelTbody.innerHTML = topModels.map(m => {
+      const pct = totalTokens > 0 ? ((m.total_tokens / totalTokens) * 100).toFixed(1) : '0';
+      const barWidth = maxTokens > 0 ? ((m.total_tokens / maxTokens) * 100) : 0;
+      return `
+        <tr>
+          <td><strong>${m.model}</strong></td>
+          <td>${fmtTokens(m.input_tokens)}</td>
+          <td>${fmtTokens(m.output_tokens)}</td>
+          <td>${fmtTokens(m.total_tokens)}</td>
+          <td>${(m.calls || 0).toLocaleString()}</td>
+          <td>¥${(m.cost || 0).toFixed(4)}</td>
+          <td>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="width:80px; height:6px; background:#2a2e3f; border-radius:3px; overflow:hidden;">
+                <div style="width:${barWidth}%; height:100%; background:var(--accent); border-radius:3px;"></div>
+              </div>
+              <span>${pct}%</span>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  // Render key pie chart
+  renderBailianKeyPie(byKey);
+  renderBailianModelBar(topModels);
+}
+
+function renderBailianKeyPie(byKey) {
+  const el = document.getElementById('blKeyPieChart');
+  if (!el) return;
+  const chart = echarts.init(el);
+  const pieData = byKey.map(k => ({name: k.key_alias, value: k.total_tokens}));
+  chart.setOption({
+    tooltip: {
+      trigger: 'item',
+      formatter: p => `${p.name}<br/>Token: ${fmtTokens(p.value)} (${p.percent}%)`
+    },
+    color: ['#6366f1','#22c55e','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#ec4899'],
+    series: [{
+      type: 'pie',
+      radius: ['40%','70%'],
+      center: ['50%','55%'],
+      itemStyle: { borderRadius: 6, borderColor: '#1a1d29', borderWidth: 2 },
+      label: { color: '#e4e6eb', formatter: '{b}\n{d}%' },
+      data: pieData
+    }]
+  });
+}
+
+function renderBailianModelBar(models) {
+  const el = document.getElementById('blModelChart');
+  if (!el) return;
+  const chart = echarts.init(el);
+  const names = models.map(m => m.model);
+  const inputData = models.map(m => m.input_tokens);
+  const outputData = models.map(m => m.output_tokens);
+  chart.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    legend: { data: ['输入 Token', '输出 Token'], textStyle: { color: '#8b8fa3' } },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
+    xAxis: { type: 'category', data: names, axisLabel: { color: '#8b8fa3', rotate: 15, interval: 0 } },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: '#8b8fa3', formatter: v => fmtTokens(v) },
+      splitLine: { lineStyle: { color: '#2a2e3f' } }
+    },
+    series: [
+      { name: '输入 Token', type: 'bar', stack: 'total', data: inputData, itemStyle: { color: '#6366f1', borderRadius: [0,0,0,0] } },
+      { name: '输出 Token', type: 'bar', stack: 'total', data: outputData, itemStyle: { color: '#22c55e', borderRadius: [4,4,0,0] } }
+    ]
+  });
+}
+
+function renderBailianTrend(data) {
+  const el = document.getElementById('blTrendChart');
+  if (!el) return;
+  const chart = echarts.init(el);
+  const trend = data.trend || [];
+  const labels = trend.map(t => t.label);
+  const inputTokens = trend.map(t => t.input_tokens);
+  const outputTokens = trend.map(t => t.output_tokens);
+  const costs = trend.map(t => t.cost);
+
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['输入 Token', '输出 Token', '费用'], textStyle: { color: '#8b8fa3' } },
+    grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
+    xAxis: { type: 'category', data: labels, axisLabel: { color: '#8b8fa3' } },
+    yAxis: [
+      { type: 'value', name: 'Token', axisLabel: { color: '#8b8fa3', formatter: v => fmtTokens(v) }, splitLine: { lineStyle: { color: '#2a2e3f' } } },
+      { type: 'value', name: '费用 (¥)', axisLabel: { color: '#8b8fa3', formatter: v => '¥' + v.toFixed(2) }, splitLine: { show: false } }
+    ],
+    series: [
+      { name: '输入 Token', type: 'bar', stack: 'tokens', data: inputTokens, itemStyle: { color: '#6366f1' } },
+      { name: '输出 Token', type: 'bar', stack: 'tokens', data: outputTokens, itemStyle: { color: '#22c55e' } },
+      { name: '费用', type: 'line', yAxisIndex: 1, data: costs, itemStyle: { color: '#f59e0b' }, smooth: true }
+    ]
+  });
+}
+
+function renderBailianDaily(data) {
+  const totals = data.totals || [];
+
+  // Daily chart
+  const el = document.getElementById('blDailyChart');
+  if (el) {
+    const chart = echarts.init(el);
+    const dates = totals.map(d => d.date.substring(5));
+    const inputData = totals.map(d => d.input_tokens);
+    const outputData = totals.map(d => d.output_tokens);
+    const costData = totals.map(d => d.cost);
+
+    chart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['输入 Token', '输出 Token', '费用'], textStyle: { color: '#8b8fa3' } },
+      grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
+      xAxis: { type: 'category', data: dates, axisLabel: { color: '#8b8fa3' } },
+      yAxis: [
+        { type: 'value', name: 'Token', axisLabel: { color: '#8b8fa3', formatter: v => fmtTokens(v) }, splitLine: { lineStyle: { color: '#2a2e3f' } } },
+        { type: 'value', name: '费用 (¥)', axisLabel: { color: '#8b8fa3' }, splitLine: { show: false } }
+      ],
+      series: [
+        { name: '输入 Token', type: 'bar', stack: 'tokens', data: inputData, itemStyle: { color: '#6366f1' } },
+        { name: '输出 Token', type: 'bar', stack: 'tokens', data: outputData, itemStyle: { color: '#22c55e' } },
+        { name: '费用', type: 'line', yAxisIndex: 1, data: costData, itemStyle: { color: '#f59e0b' }, smooth: true }
+      ]
+    });
+  }
+
+  // Daily table
+  const tbody = document.querySelector('#blDailyTable tbody');
+  if (totals.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:40px; color:#666">暂无数据</td></tr>';
+  } else {
+    tbody.innerHTML = totals.map(d => `
+      <tr>
+        <td>${d.date}</td>
+        <td>${fmtTokens(d.input_tokens)}</td>
+        <td>${fmtTokens(d.output_tokens)}</td>
+        <td>${fmtTokens(d.total_tokens)}</td>
+        <td>${(d.calls || 0).toLocaleString()}</td>
+        <td>¥${(d.cost || 0).toFixed(4)}</td>
+      </tr>
+    `).join('');
+  }
+}
 </script>
 
 <!-- Auth Modal -->

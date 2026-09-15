@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from costlens.web.auth import verify_token
 from costlens.web.budget_routes import router as budget_router
+from costlens.bailian.routes import router as bailian_router
 from costlens.db import get_backend
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,27 @@ async def lifespan(app: FastAPI):
             logger.error("Failed to start WeChat Bot: %s", exc, exc_info=True)
     else:
         logger.info("WeChat Bot not configured (missing BOT_ID/BOT_SECRET)")
+
+
+    # Auto-register Bailian API keys from config
+    bailian_keys = settings.get_bailian_keys()
+    if bailian_keys:
+        try:
+            from costlens.bailian.tracker import get_bailian_tracker
+            tracker = get_bailian_tracker()
+            for key_cfg in bailian_keys:
+                alias = key_cfg.get("alias", "")
+                if alias:
+                    tracker.add_api_key(
+                        key_alias=alias,
+                        key_prefix=key_cfg.get("prefix", ""),
+                        description=key_cfg.get("description", ""),
+                    )
+            logger.info("Registered %d Bailian API keys", len(bailian_keys))
+        except Exception as exc:
+            logger.error("Failed to register Bailian keys: %s", exc)
+    else:
+        logger.info("No Bailian API keys configured")
 
     yield
 
@@ -69,6 +91,7 @@ ENABLED_PROVIDERS = ["alibaba", "tencent"]
 
 # Include budget routes
 app.include_router(budget_router)
+app.include_router(bailian_router)
 
 
 @app.get("/metrics")

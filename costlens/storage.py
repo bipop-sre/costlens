@@ -144,6 +144,37 @@ CREATE TABLE IF NOT EXISTS monthly_cost_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_monthly_cost_period ON monthly_cost_snapshots(year, month);
+
+-- Bailian token usage tracking
+CREATE TABLE IF NOT EXISTS bailian_api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_alias TEXT NOT NULL UNIQUE,
+    key_prefix TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS bailian_usage_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_alias TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    call_count INTEGER DEFAULT 1,
+    estimated_cost REAL DEFAULT 0.0,
+    usage_date DATE NOT NULL,
+    request_id TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(key_alias, model_name, usage_date, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bailian_usage_date ON bailian_usage_records(usage_date);
+CREATE INDEX IF NOT EXISTS idx_bailian_usage_key ON bailian_usage_records(key_alias);
+CREATE INDEX IF NOT EXISTS idx_bailian_usage_model ON bailian_usage_records(model_name);
+CREATE INDEX IF NOT EXISTS idx_bailian_usage_key_date ON bailian_usage_records(key_alias, usage_date);
 """
 
 

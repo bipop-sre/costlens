@@ -133,6 +133,35 @@ CREATE TABLE IF NOT EXISTS monthly_cost_snapshots (
     UNIQUE KEY uk_monthly_cost (year, month, provider),
     INDEX idx_monthly_cost_period (year, month)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bailian_api_keys (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    key_alias VARCHAR(128) NOT NULL UNIQUE,
+    key_prefix VARCHAR(64) DEFAULT '',
+    description VARCHAR(512) DEFAULT '',
+    is_active TINYINT DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS bailian_usage_records (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    key_alias VARCHAR(128) NOT NULL,
+    model_name VARCHAR(256) NOT NULL,
+    input_tokens BIGINT DEFAULT 0,
+    output_tokens BIGINT DEFAULT 0,
+    total_tokens BIGINT DEFAULT 0,
+    call_count INT DEFAULT 1,
+    estimated_cost DOUBLE DEFAULT 0.0,
+    usage_date DATE NOT NULL,
+    request_id VARCHAR(256) DEFAULT '',
+    metadata_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_bailian_usage (key_alias, model_name, usage_date, request_id),
+    INDEX idx_bailian_usage_date (usage_date),
+    INDEX idx_bailian_usage_key (key_alias),
+    INDEX idx_bailian_usage_model (model_name),
+    INDEX idx_bailian_usage_key_date (key_alias, usage_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
 

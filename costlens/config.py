@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from enum import Enum
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +57,9 @@ class Settings(BaseSettings):
     tencent_cloud_secret_key: Optional[str] = None
     tencent_cloud_region: str = "ap-guangzhou"
 
+    # Bailian (百炼/DashScope) token tracking
+    # JSON array: [{"alias":"prod","prefix":"sk-xxx","description":"Production key"}]
+    bailian_api_keys: str = "[]"
 
     # Database (sqlite or oceanbase)
     db_type: str = "sqlite"
@@ -91,6 +95,16 @@ class Settings(BaseSettings):
             if name:
                 providers.append(CloudProvider(name))
         return providers
+
+    def get_bailian_keys(self) -> list[dict]:
+        """Parse Bailian API key configurations from JSON."""
+        try:
+            keys = json.loads(self.bailian_api_keys)
+            if isinstance(keys, list):
+                return keys
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return []
 
 
 @lru_cache
