@@ -303,6 +303,12 @@ tr:hover td { background: rgba(99,102,241,0.05); }
       <div class="stat-card"><div class="label">估算费用</div><div class="value" id="blCost">-</div><div class="sub neutral" id="blCalls">-</div></div>
     </div>
 
+    <div style="margin: 12px 0; display:flex; gap:8px; align-items:center;">
+      <button onclick="seedTestData()" style="padding:6px 14px; background:#4CAF50; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🧪 插入测试数据</button>
+      <button onclick="runDiagnose()" style="padding:6px 14px; background:#2196F3; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔍 诊断数据链路</button>
+      <span id="blDiagResult" style="font-size:13px; color:#666;"></span>
+    </div>
+
     <div class="chart-row">
       <div class="chart-box">
         <h3>📈 百炼 Token 用量趋势</h3>
@@ -1276,6 +1282,85 @@ function renderBailianDaily(data) {
       </tr>
     `).join('');
   }
+}
+
+
+async function seedTestData() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '插入中...';
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const models = ['qwen-max', 'qwen-plus', 'qwen-turbo'];
+    const aliases = ['default'];
+    let totalInserted = 0;
+    for (let d = 0; d < 7; d++) {
+      const date = new Date();
+      date.setDate(date.getDate() - d);
+      const dateStr = date.toISOString().slice(0,10);
+      for (const model of models) {
+        for (const alias of aliases) {
+          const input = Math.floor(Math.random() * 50000) + 1000;
+          const output = Math.floor(Math.random() * 20000) + 500;
+          const res = await fetch(API + '/api/bailian/usage', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(authToken ? {'Authorization': 'Bearer ' + authToken} : {})
+            },
+            body: JSON.stringify({
+              key_alias: alias,
+              model_name: model,
+              input_tokens: input,
+              output_tokens: output,
+              call_count: Math.floor(Math.random() * 20) + 1,
+              usage_date: dateStr,
+              request_id: 'seed-' + dateStr + '-' + model
+            })
+          });
+          if (res.ok) totalInserted++;
+        }
+      }
+    }
+    document.getElementById('blDiagResult').innerHTML =
+      '<span style="color:#4CAF50">✅ 已插入 ' + totalInserted + ' 条测试数据，正在刷新...</span>';
+    await loadBailianAll();
+  } catch (e) {
+    document.getElementById('blDiagResult').innerHTML =
+      '<span style="color:red">❌ 插入失败: ' + e.message + '</span>';
+  }
+  btn.disabled = false;
+  btn.textContent = '🧪 插入测试数据';
+}
+
+async function runDiagnose() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '诊断中...';
+  const resultEl = document.getElementById('blDiagResult');
+  try {
+    const data = await fetchJSON('/api/bailian/diagnose');
+    let html = '<br>';
+    for (const step of data.steps) {
+      const icon = step.status === 'ok' ? '✅' : '❌';
+      let detail = '';
+      if (step.step === 'list_keys') detail = ` (${step.count} keys: ${(step.keys||[]).join(', ')})`;
+      if (step.step === 'write_test') detail = ` (${step.total_tokens} tokens)`;
+      if (step.step === 'read_test') detail = ` (${step.diag_records} diag rows)`;
+      if (step.step === 'total_records') detail = ` (共 ${step.count} 条记录)`;
+      if (step.error) detail = ` <span style="color:red">Error: ${step.error}</span>`;
+      html += `${icon} ${step.step}${detail}<br>`;
+    }
+    const overall = data.overall === 'ok'
+      ? '<span style="color:#4CAF50; font-weight:bold">整体: ✅ 正常</span>'
+      : '<span style="color:red; font-weight:bold">整体: ❌ 异常</span>';
+    resultEl.innerHTML = overall + html;
+    if (data.overall === 'ok') await loadBailianAll();
+  } catch (e) {
+    resultEl.innerHTML = '<span style="color:red">❌ 诊断请求失败: ' + e.message + ' (可能尚未部署)</span>';
+  }
+  btn.disabled = false;
+  btn.textContent = '🔍 诊断数据链路';
 }
 </script>
 

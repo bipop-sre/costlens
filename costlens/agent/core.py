@@ -135,6 +135,7 @@ class CostLensAgent:
                 temperature=0.3,
             )
 
+            logger.info("Tracking Bailian response: model=%s, has_usage=%s", self.settings.openai_model, hasattr(response, "usage") and response.usage is not None)
             track_openai_response("default", response, self.settings.openai_model)
             choice = response.choices[0]
             assistant_message = choice.message
@@ -177,6 +178,7 @@ class CostLensAgent:
             messages=messages,
             temperature=0.3,
         )
+        logger.info("Tracking Bailian final response: model=%s", self.settings.openai_model)
         track_openai_response("default", response, self.settings.openai_model)
         return response.choices[0].message.content or ""
 
@@ -204,6 +206,7 @@ class CostLensAgent:
                 temperature=0.3,
             )
 
+            logger.info("Stream: Tracking Bailian response: model=%s, has_usage=%s", self.settings.openai_model, hasattr(response, "usage") and response.usage is not None)
             track_openai_response("default", response, self.settings.openai_model)
             choice = response.choices[0]
             assistant_message = choice.message
