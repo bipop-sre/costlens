@@ -61,10 +61,32 @@ async def lifespan(app: FastAPI):
             logger.info("Registered %d Bailian API keys", len(bailian_keys))
         except Exception as exc:
             logger.error("Failed to register Bailian keys: %s", exc)
+
+        # Start Bailian probe for real tracking data
+        if settings.openai_api_key and "dashscope" in settings.openai_base_url:
+            try:
+                from costlens.bailian.probe import start_probe
+                start_probe(
+                    api_key=settings.openai_api_key,
+                    base_url=settings.openai_base_url,
+                    model=settings.openai_model,
+                    key_alias="default",
+                    interval_minutes=5,
+                )
+                logger.info("Bailian probe started (every 5 minutes)")
+            except Exception as exc:
+                logger.error("Failed to start Bailian probe: %s", exc)
     else:
         logger.info("No Bailian API keys configured")
 
     yield
+
+    # Stop Bailian probe
+    try:
+        from costlens.bailian.probe import stop_probe
+        await stop_probe()
+    except Exception:
+        pass
 
     if _bot_service is not None:
         try:

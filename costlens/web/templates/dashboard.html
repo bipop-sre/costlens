@@ -306,6 +306,8 @@ tr:hover td { background: rgba(99,102,241,0.05); }
     <div style="margin: 12px 0; display:flex; gap:8px; align-items:center;">
       <button onclick="seedTestData()" style="padding:6px 14px; background:#4CAF50; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🧪 插入测试数据</button>
       <button onclick="runDiagnose()" style="padding:6px 14px; background:#2196F3; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px;">🔍 诊断数据链路</button>
+      <button onclick="triggerProbe()" id="btnProbe" style="padding:6px 14px; background:#FF9800; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:13px;">⚡ 手动探测一次</button>
+      <span id="blProbeStatus" style="font-size:12px; color:#888;"></span>
       <span id="blDiagResult" style="font-size:13px; color:#666;"></span>
     </div>
 
@@ -1361,6 +1363,33 @@ async function runDiagnose() {
   }
   btn.disabled = false;
   btn.textContent = '🔍 诊断数据链路';
+}
+
+async function triggerProbe() {
+  const btn = document.getElementById('btnProbe');
+  btn.disabled = true;
+  btn.textContent = '探测中...';
+  const status = document.getElementById('blProbeStatus');
+  status.textContent = '正在调用百炼 API...';
+  try {
+    const res = await fetch(API + '/api/bailian/probe/trigger', {
+      method: 'POST',
+      headers: authToken ? {'Authorization': 'Bearer ' + authToken} : {}
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      status.innerHTML = '<span style="color:#4CAF50">✅ ' + data.model + ': ' +
+        data.input_tokens + ' in + ' + data.output_tokens + ' out = ' + data.total_tokens +
+        ' tokens (¥' + (data.estimated_cost||0).toFixed(4) + ')</span>';
+      await loadBailianAll();
+    } else {
+      status.innerHTML = '<span style="color:red">❌ ' + (data.reason || data.error || '未知错误') + '</span>';
+    }
+  } catch (e) {
+    status.innerHTML = '<span style="color:red">❌ 请求失败: ' + e.message + '</span>';
+  }
+  btn.disabled = false;
+  btn.textContent = '⚡ 手动探测一次';
 }
 </script>
 

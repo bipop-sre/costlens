@@ -362,3 +362,32 @@ async def diagnose():
 
     results["overall"] = "ok"
     return results
+
+
+# ── Probe Control ──
+
+
+@router.get("/probe/status", dependencies=[Depends(verify_token)])
+async def probe_status():
+    """Get probe status."""
+    from costlens.bailian.probe import get_probe
+    probe = get_probe()
+    if probe is None:
+        return {"running": False, "message": "探针未启动"}
+    return {
+        "running": probe._running,
+        "model": probe._model,
+        "key_alias": probe._key_alias,
+        "interval_seconds": probe._interval,
+    }
+
+
+@router.post("/probe/trigger", dependencies=[Depends(verify_token)])
+async def probe_trigger():
+    """Manually trigger a single probe call."""
+    from costlens.bailian.probe import get_probe
+    probe = get_probe()
+    if probe is None:
+        raise HTTPException(status_code=400, detail="探针未启动，请先配置百炼 API Key")
+    result = await probe._probe_once()
+    return result
