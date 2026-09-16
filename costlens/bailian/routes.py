@@ -391,3 +391,60 @@ async def probe_trigger():
         raise HTTPException(status_code=400, detail="探针未启动，请先配置百炼 API Key")
     result = await probe._probe_once()
     return result
+
+
+# ── Data Cleanup ──
+
+
+@router.post("/usage/clear", dependencies=[Depends(verify_token)])
+async def clear_usage(
+    key_alias: Optional[str] = None,
+    before_date: Optional[str] = None,
+    include_seed: bool = Query(True, description="Include seed test data"),
+    include_probe: bool = Query(True, description="Include probe data"),
+):
+    """Clear bailian usage records. By default clears all records."""
+    from costlens.db import get_backend
+    backend = get_backend()
+
+    conditions = []
+    params = []
+
+    if key_alias:
+        conditions.append("key_alias = ?")
+        params.append(key_alias)
+
+    if before_date:
+        conditions.append("usage_date < ?")
+        params.append(before_date)
+
+    # If filtering seed/probe, use request_id patterns
+    id_filters = []
+    if include_seed:
+        id_filters.append("request_id LIKE ?")
+        params.append("seed-%")
+    if include_probe:
+        id_filters.append("request_id LIKE ?")
+        params.append("probe-%")
+
+    if id_filters and not key_alias and not before_date:
+        # Only clearing seed/probe data, no other filter
+        pass
+    elif id_filters:
+        conditions.append("(" + " OR ".join(id_filters) + ")")
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    sql = backend.adapt_sql(f"DELETE FROM bailian_usage_records WHERE {where}")
+    with backend.connect() as conn:
+        result = conn.execute(sql, params)
+        deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+        conn.commit()
+
+    # Also clear test keys
+    if not key_alias:
+        sql2 = backend.adapt_sql("DELETE FROM bailian_api_keys WHERE key_alias = ?")
+        with backend.connect() as conn:
+            conn.execute(sql2, ("test-key",))
+            conn.commit()
+
+    return {"status": "ok", "deleted": deleted, "message": f"已删除 {deleted} 条记录"}
