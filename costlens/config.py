@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # WeChat Work Bot
     wechat_work_bot_id: Optional[str] = None
     wechat_work_bot_secret: Optional[str] = None
+
+    # Report notification target chatids (comma-separated, empty = broadcast to all)
+    report_target_chatids: Optional[str] = None
     web_auth_token: Optional[str] = None
     alert_email: Optional[str] = None
 
@@ -110,3 +113,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+

@@ -37,7 +37,7 @@ class ProactiveInspector:
         self._notified_today: set[tuple[str, str, str]] = set()
         self._notified_date: Optional[date] = None
 
-    async def inspect_after_sync(self, broadcast_fn) -> dict:
+    async def inspect_after_sync(self, broadcast_fn, target_chatids=None) -> dict:
         """Run inspection after billing sync completes."""
         now = datetime.now()
         today = date.today()

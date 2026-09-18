@@ -321,13 +321,31 @@ class WeChatBotService:
         except Exception as exc:
             logger.error("Markdown reply failed: %s", exc, exc_info=True)
 
-    async def broadcast(self, content: str) -> int:
-        """Send a message to all connected chats. Returns count of successful sends."""
+    async def broadcast(self, content: str, target_chatids: Optional[set[str]] = None) -> int:
+        """Send a message to chats. If target_chatids is provided, only send to those; otherwise send to all.
+        
+        Args:
+            content: Markdown content to send
+            target_chatids: Optional set of chatids to send to. If None, broadcasts to all connected chats.
+            
+        Returns:
+            Count of successful sends
+        """
         if not self._running or self._ws_client is None:
             return 0
 
+        # Determine which chatids to send to
+        if target_chatids is not None:
+            # Filter to only connected targets
+            send_to = target_chatids & self._connected_chatids
+            if not send_to:
+                logger.warning("No matching connected chatids for targets: %s", target_chatids)
+                return 0
+        else:
+            send_to = self._connected_chatids
+
         success = 0
-        for chatid in self._connected_chatids:
+        for chatid in send_to:
             try:
                 await self._ws_client.send_message(
                     chatid,

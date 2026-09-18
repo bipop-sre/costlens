@@ -28,6 +28,14 @@ class BillingScheduler:
         self._last_sync: Optional[datetime] = None
         self._inspector = ProactiveInspector(settings)
         self._broadcast_fn = None
+        
+        # Parse target chatids for reports from config
+        self._report_target_chatids = None
+        if settings.report_target_chatids:
+            self._report_target_chatids = set(
+                cid.strip() for cid in settings.report_target_chatids.split(',') if cid.strip()
+            )
+            logger.info("Report target chatids configured: %s", self._report_target_chatids)
 
     def set_broadcast_fn(self, broadcast_fn):
         """Set the broadcast function for notifications."""
@@ -107,7 +115,9 @@ class BillingScheduler:
         # Run proactive inspection after sync
         if self._broadcast_fn:
             try:
-                inspection_results = await self._inspector.inspect_after_sync(self._broadcast_fn)
+                inspection_results = await self._inspector.inspect_after_sync(
+                    self._broadcast_fn, self._report_target_chatids
+                )
                 result["inspection"] = inspection_results
                 logger.info("Inspection done: %s", inspection_results)
             except Exception as exc:
