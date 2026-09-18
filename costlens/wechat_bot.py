@@ -81,6 +81,15 @@ class WeChatBotService:
         await self._ws_client.connect()
         self._running = True
         
+        # Auto-load configured target chatids so reports work without manual reconnection
+        if self.settings.report_target_chatids:
+            for chatid in self.settings.report_target_chatids.split(','):
+                chatid = chatid.strip()
+                if chatid:
+                    self._connected_chatids.add(chatid)
+            logger.info("Pre-loaded %d target chatid(s) from config: %s", 
+                       len(self._connected_chatids), self._connected_chatids)
+        
         # Start billing scheduler (hourly sync)
         self._scheduler = BillingScheduler(self.settings)
         self._scheduler.set_broadcast_fn(self.broadcast)
