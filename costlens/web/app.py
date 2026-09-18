@@ -657,8 +657,12 @@ async def get_connected_chatids():
     }
 
 @app.post("/api/wechat/test-report", dependencies=[Depends(verify_token)])
-async def test_daily_report():
-    """Test send daily report to verify configuration."""
+async def test_daily_report(type: str = Query("daily", enum=["daily", "weekly"])):
+    """Test send report to verify configuration.
+    
+    Args:
+        type: Report type - "daily" for daily report, "weekly" for weekly report
+    """
     global _bot_service
     if _bot_service is None or not _bot_service.is_running:
         return {"status": "error", "message": "WeChat bot not running"}
@@ -668,7 +672,12 @@ async def test_daily_report():
     
     settings = get_settings()
     inspector = ProactiveInspector(settings)
-    report = inspector._generate_daily_report()
+    
+    # Generate report based on type
+    if type == "weekly":
+        report = inspector._generate_weekly_report()
+    else:
+        report = inspector._generate_daily_report()
     
     if not report:
         return {"status": "error", "message": "No report generated (no data available)"}
@@ -683,7 +692,8 @@ async def test_daily_report():
     
     return {
         "status": "ok",
-        "message": f"Daily report sent to {count} chat(s)",
+        "type": type,
+        "message": f"{type.capitalize()} report sent to {count} chat(s)",
         "target_chatids": list(target_chatids) if target_chatids else "all",
         "report_preview": report[:200] + "..." if len(report) > 200 else report
     }
