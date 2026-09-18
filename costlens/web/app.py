@@ -640,3 +640,18 @@ async def serve_dashboard():
 def create_app():
     """Factory for creating the FastAPI app."""
     return app
+
+@app.get("/api/wechat/chatids", dependencies=[Depends(verify_token)])
+async def get_connected_chatids():
+    """Get all connected WeChat chatids for report targeting configuration."""
+    global _bot_service
+    if _bot_service is None or not _bot_service.is_running:
+        return {"status": "error", "message": "WeChat bot not running"}
+    
+    chatids = list(_bot_service.connected_chatids)
+    return {
+        "status": "ok",
+        "connected_chatids": chatids,
+        "count": len(chatids),
+        "hint": "Set REPORT_TARGET_CHATIDS env var with comma-separated chatids to target specific chats for reports"
+    }
