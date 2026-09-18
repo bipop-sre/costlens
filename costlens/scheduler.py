@@ -104,14 +104,14 @@ class BillingScheduler:
         }
         logger.info("Billing sync done: %d records, %.2f total", total_records, total_cost)
         
-        # # Run proactive inspection after sync
-        # if self._broadcast_fn:
-        #     try:
-        #         inspection_results = await self._inspector.inspect_after_sync(self._broadcast_fn)
-        #         result["inspection"] = inspection_results
-        #         logger.info("Inspection done: %s", inspection_results)
-        #     except Exception as exc:
-        #         logger.error("Inspection failed: %s", exc)
+        # Run proactive inspection after sync
+        if self._broadcast_fn:
+            try:
+                inspection_results = await self._inspector.inspect_after_sync(self._broadcast_fn)
+                result["inspection"] = inspection_results
+                logger.info("Inspection done: %s", inspection_results)
+            except Exception as exc:
+                logger.error("Inspection failed: %s", exc)
         
         # Check budget thresholds
         try:

@@ -52,20 +52,8 @@ class ProactiveInspector:
             "weekly_report_sent": False,
         }
 
-        # 1. Detect and notify critical anomalies
-        alerts = self._detect_anomalies()
-        if alerts:
-            results["alerts_created"] = len(alerts)
-            critical_alerts = [a for a in alerts if a.severity == AlertSeverity.CRITICAL]
-            
-            if critical_alerts:
-                msg = self._format_critical_alerts(critical_alerts)
-                try:
-                    await broadcast_fn(msg)
-                    results["alerts_notified"] = len(critical_alerts)
-                    logger.info("Notified %d critical alerts", len(critical_alerts))
-                except Exception as exc:
-                    logger.error("Failed to broadcast alerts: %s", exc)
+        # 1. Detect and notify critical anomalies (DISABLED)
+        # Anomaly alerts temporarily disabled; daily/weekly reports remain active.
 
         # 2. Daily cost report (once per day, after 9 AM)
         today = date.today()
