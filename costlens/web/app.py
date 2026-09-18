@@ -655,3 +655,35 @@ async def get_connected_chatids():
         "count": len(chatids),
         "hint": "Set REPORT_TARGET_CHATIDS env var with comma-separated chatids to target specific chats for reports"
     }
+
+@app.post("/api/wechat/test-report", dependencies=[Depends(verify_token)])
+async def test_daily_report():
+    """Test send daily report to verify configuration."""
+    global _bot_service
+    if _bot_service is None or not _bot_service.is_running:
+        return {"status": "error", "message": "WeChat bot not running"}
+    
+    from costlens.analysis.proactive_inspector import ProactiveInspector
+    from costlens.config import get_settings
+    
+    settings = get_settings()
+    inspector = ProactiveInspector(settings)
+    report = inspector._generate_daily_report()
+    
+    if not report:
+        return {"status": "error", "message": "No report generated (no data available)"}
+    
+    # Parse target chatids from config
+    target_chatids = None
+    if settings.report_target_chatids:
+        target_chatids = set(cid.strip() for cid in settings.report_target_chatids.split(',') if cid.strip())
+    
+    # Send using the bot's broadcast method
+    count = await _bot_service.broadcast(report, target_chatids)
+    
+    return {
+        "status": "ok",
+        "message": f"Daily report sent to {count} chat(s)",
+        "target_chatids": list(target_chatids) if target_chatids else "all",
+        "report_preview": report[:200] + "..." if len(report) > 200 else report
+    }
