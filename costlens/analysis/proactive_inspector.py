@@ -76,7 +76,7 @@ class ProactiveInspector:
             try:
                 report = self._generate_weekly_report()
                 if report:
-                    await broadcast_fn(report)
+                    await broadcast_fn(report, target_chatids)
                     results["weekly_report_sent"] = True
                     self._last_weekly_report = today
                     logger.info("Weekly report sent")
