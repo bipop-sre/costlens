@@ -112,7 +112,7 @@ ruff check costlens/ && ruff format costlens/
 docker build -t costlens:latest .
 ```
 
-支持 Docker / Kubernetes (Helm) 部署，存储支持 SQLite 和 OceanBase。详见 [部署文档](docs/)。
+支持 Docker / Kubernetes (Helm) 部署，存储支持 SQLite 和 Mysql。详见 [部署文档](docs/)。
 
 ## 相关文档
 
